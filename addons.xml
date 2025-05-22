@@ -1,30 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <addons>
-    <addon id="plugin.video.DemoStream"
-        name="DemoStream"
-        version="0.9"
-        provider-name="Speed99">
-        <requires>
-            <import addon="xbmc.python" version="3.0.0" />
-        </requires>
-        <extension point="xbmc.python.pluginsource" library="default.py">
-            <provides>video</provides>
-        </extension>
-        <extension point="xbmc.addon.metadata">
-            <summary>Osobný WS player, ktorý využíva verejne dostupné informácie a spája ich</summary>
-            <description lang="sk">
-                Komplexný KODI doplnok pre prehliadanie a prehrávanie filmov a seriálov z
-                osobnej databázy a služby Webshare.
-                Podporuje vyhľadávanie cez TMDb, odporúčania z ČSFD, zobrazovanie jazykových stôp,
-                uchovávanie histórie prehrávania a vyhľadávania, a prihlásenie do Webshare cez
-                zabezpečený token.
-                Doplnok umožňuje pohodlný výber rozlíšenia a jazyka zvuku pri prehrávaní, a
-                poskytuje intuitívne a vizuálne rozhranie priamo v KODI. Na správne fungovanie je potrebné
-                zadať prihlasovacie údaje do databázy, TMDB a WS.
-            </description>
-            <platform>all</platform>
-            <assets>
-                <icon>icon.png</icon>
-            </assets>
-        </extension>
-    </addon>
+<addon id="plugin.video.DemoStream" name="DemoStream" version="0.9" provider-name="Speed99">
+    <requires>
+        <import addon="xbmc.python" version="3.0.0" />
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="default.py">
+        <provides>video</provides>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary>Osobný WS player, ktorý využíva verejne dostupné informácie a spája ich</summary>
+        <description lang="sk"> Komplexný KODI doplnok pre prehliadanie a prehrávanie filmov a
+            seriálov z osobnej databázy a služby Webshare. Podporuje vyhľadávanie cez TMDb,
+            odporúčania z ČSFD, zobrazovanie jazykových stôp, uchovávanie histórie prehrávania a
+            vyhľadávania, a prihlásenie do Webshare cez zabezpečený token. Doplnok umožňuje pohodlný
+            výber rozlíšenia a jazyka zvuku pri prehrávaní, a poskytuje intuitívne a vizuálne
+            rozhranie priamo v KODI. Na správne fungovanie je potrebné zadať prihlasovacie údaje do
+            databázy, TMDB a WS. </description>
+        <platform>all</platform>
+        <assets>
+            <icon>icon.png</icon>
+        </assets>
+    </extension>
+</addon>
+<addon id="repository.demolator" name="Demolator Repository" version="1.0.0"
+       provider-name="Speed99">
+    <requires>
+        <import addon="xbmc.addon" version="12.0.0"/>
+    </requires>
+    <extension point="xbmc.addon.repository"
+               name="Demolator Repo">
+        <info compressed="false">https://tvojusername.github.io/kodi-repo/addons.xml</info>
+        <checksum>https://tvojusername.github.io/kodi-repo/addons.xml.md5</checksum>
+        <datadir>https://tvojusername.github.io/kodi-repo/</datadir>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary>Demolator repo s doplnkom</summary>
+        <description>Obsahuje DemoStream doplnok pre Kodi.</description>
+        <platform>all</platform>
+    </extension>
+</addon>
 </addons>
