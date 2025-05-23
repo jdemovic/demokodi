@@ -1,25 +1,59 @@
 import os
+import zipfile
 import hashlib
+from xml.etree import ElementTree as ET
 
-def generate_addons_xml(addons_dir):
-    addons_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<addons>\n"
+REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+ZIPS_DIR = os.path.join(REPO_DIR, "zips")
+ADDONS_XML = os.path.join(REPO_DIR, "addons.xml")
+ADDONS_MD5 = os.path.join(REPO_DIR, "addons.xml.md5")
 
-    for addon in sorted(os.listdir(addons_dir)):
-        addon_path = os.path.join(addons_dir, addon)
-        addon_xml_path = os.path.join(addon_path, "addon.xml")
-        if os.path.isdir(addon_path) and os.path.isfile(addon_xml_path):
-            with open(addon_xml_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                content = content.strip()
-                addons_xml += content + "\n"
+def get_addon_dirs():
+    return [d for d in os.listdir(REPO_DIR) if os.path.isdir(d) and d.startswith(("plugin.", "repository."))]
 
-    addons_xml += "</addons>"
+def create_zip(addon_dir):
+    addon_xml = os.path.join(REPO_DIR, addon_dir, "addon.xml")
+    tree = ET.parse(addon_xml)
+    addon_id = tree.getroot().attrib["id"]
+    addon_version = tree.getroot().attrib["version"]
 
-    with open("addons.xml", "w", encoding="utf-8") as f:
-        f.write(addons_xml)
+    dest_dir = os.path.join(ZIPS_DIR, addon_id)
+    os.makedirs(dest_dir, exist_ok=True)
+    zip_path = os.path.join(dest_dir, f"{addon_id}-{addon_version}.zip")
 
-    md5_hash = hashlib.md5(addons_xml.encode('utf-8')).hexdigest()
-    with open("addons.xml.md5", "w") as f:
-        f.write(md5_hash)
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(os.path.join(REPO_DIR, addon_dir)):
+            for file in files:
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path, REPO_DIR)
+                zf.write(full_path, rel_path)
 
-generate_addons_xml(".")
+    return addon_id, tree
+
+def write_addons_xml(addon_elements):
+    root = ET.Element("addons")
+    for element in addon_elements:
+        root.append(element.getroot())
+
+    tree = ET.ElementTree(root)
+    tree.write(ADDONS_XML, encoding="UTF-8", xml_declaration=True)
+
+def write_md5():
+    with open(ADDONS_XML, "rb") as f:
+        content = f.read()
+    md5 = hashlib.md5(content).hexdigest()
+    with open(ADDONS_MD5, "w") as f:
+        f.write(md5)
+
+if __name__ == "__main__":
+    os.makedirs(ZIPS_DIR, exist_ok=True)
+    addon_elements = []
+
+    for addon in get_addon_dirs():
+        print(f"Packing {addon}...")
+        addon_id, tree = create_zip(addon)
+        addon_elements.append(tree)
+
+    write_addons_xml(addon_elements)
+    write_md5()
+    print("Done.")
