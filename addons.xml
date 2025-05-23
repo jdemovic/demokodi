@@ -28,7 +28,7 @@
   <extension point="xbmc.addon.repository" name="Demolator Repo">
     <info compressed="false">https://jdemovic.github.io/demoKodi/addons.xml</info>
     <checksum>https://jdemovic.github.io/demoKodi/addons.xml.md5</checksum>
-    <datadir zip="true">https://jdemovic.github.io/demoKodi/zips</datadir> 
+    <datadir zip="true">https://jdemovic.github.io/demoKodi/zips/</datadir> 
   </extension>
   <extension point="xbmc.addon.metadata">
     <summary>Demolator repo s doplnkom</summary>
