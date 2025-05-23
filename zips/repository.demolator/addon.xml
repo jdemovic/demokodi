@@ -5,9 +5,9 @@
   </requires>
   <extension point="xbmc.addon.repository" name="Demolator Repo">
     <dir>
-      <info compressed="false">https://jdemovic.github.io/demoKodi/addons.xml</info>
-      <checksum>https://jdemovic.github.io/demoKodi/addons.xml.md5</checksum>
-      <datadir zip="true">https://jdemovic.github.io/demoKodi/zips/</datadir>
+      <info compressed="false">https://jdemovic.github.io/demokodi/addons.xml</info>
+      <checksum>https://jdemovic.github.io/demokodi/addons.xml.md5</checksum>
+      <datadir zip="true">https://jdemovic.github.io/demokodi/zips/</datadir>
     </dir>
   </extension>
   <extension point="xbmc.addon.metadata">
