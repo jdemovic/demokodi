@@ -9,12 +9,12 @@
     <extension point="xbmc.addon.metadata">
         <summary>Osobný WS player, ktorý využíva verejne dostupné informácie a spája ich</summary>
         <description lang="sk"> Komplexný KODI doplnok pre prehliadanie a prehrávanie filmov a
-            seriálov z osobnej databázy a služby Webshare. Podporuje vyhľadávanie cez TMDb,
-            odporúčania z ČSFD, zobrazovanie jazykových stôp, uchovávanie histórie prehrávania a
-            vyhľadávania, a prihlásenie do Webshare cez zabezpečený token. Doplnok umožňuje pohodlný
-            výber rozlíšenia a jazyka zvuku pri prehrávaní, a poskytuje intuitívne a vizuálne
-            rozhranie priamo v KODI. Na správne fungovanie je potrebné zadať prihlasovacie údaje do
-            databázy, TMDB a WS. </description>
+seriálov z osobnej databázy a služby Webshare. Podporuje vyhľadávanie cez TMDb,
+odporúčania z ČSFD, zobrazovanie jazykových stôp, uchovávanie histórie prehrávania a
+vyhľadávania, a prihlásenie do Webshare cez zabezpečený token. Doplnok umožňuje pohodlný
+výber rozlíšenia a jazyka zvuku pri prehrávaní, a poskytuje intuitívne a vizuálne
+rozhranie priamo v KODI. Na správne fungovanie je potrebné zadať prihlasovacie údaje do
+databázy, TMDB a WS. </description>
         <platform>all</platform>
         <assets>
             <icon>icon.png</icon>
