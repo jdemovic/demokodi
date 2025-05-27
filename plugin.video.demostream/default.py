@@ -34,19 +34,19 @@ except ImportError:
     # MongoDB Connection Manager
 class MongoDBConnection:
     _instance = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialize()
         return cls._instance
-    
+
     def _initialize(self):
         #uri = f"mongodb+srv://{mongodb_user}:{mongodb_pass}@{mongodb_host}/sc3?authSource=sc3"
         uri = f"mongodb://{mongodb_user}:{mongodb_pass}@{mongodb_host}/{mongodb_db}?authSource={mongodb_db}"
         self.client = MongoClient(uri, maxPoolSize=50, connectTimeoutMS=5000, socketTimeoutMS=30000)
         self.db = self.client[mongodb_db]
-        
+
     def get_db(self):
         try:
             self.client.admin.command('ping')
@@ -130,7 +130,7 @@ def webshare_login():
         if not salt:
             xbmc.log("❌ Nepodarilo sa získať salt.", xbmc.LOGERROR)
             return
-        
+
         xbmc.log(f"✅ Salt úspešne získaný. Salt: {salt}", xbmc.LOGINFO)
 
         encrypted_pass = hashlib.sha1(md5crypt(webshare_pass.encode('utf-8'), salt.encode('utf-8')).encode('utf-8')).hexdigest()
@@ -167,42 +167,42 @@ def webshare_login():
 
     except Exception as e:
         xbmc.log(f"❌ Výnimka pri prihlasovaní do Webshare: {e}", xbmc.LOGERROR)
-        
+
 #-------- Token validácia --------
 def is_token_valid():
     """Check if stored token is still valid"""
     try:
         token = addon.getSetting("webshare_token")
         expiry_str = addon.getSetting("token_expiry")
-        
+
         if not token or not expiry_str:
             return False
-            
+
         expiry_time = datetime.fromisoformat(expiry_str)
         return datetime.now() < expiry_time
     except Exception as e:
         xbmc.log(f"Token validation error: {str(e)}", xbmc.LOGERROR)
         return False
-    
+
 #-------- Token získanie --------
 def get_webshare_token():
     """Get valid token without unnecessary refresh"""
     global webshare_token
-    
+
     # Return valid in-memory token if available
     if webshare_token and is_token_valid():
         return webshare_token
-        
+
     # Check stored token
     stored_token = addon.getSetting("webshare_token")
     if stored_token and is_token_valid():
         webshare_token = stored_token
         return webshare_token
-        
+
     # Only login if token is missing or expired
     if webshare_login():
         return webshare_token
-        
+
     return None
 
 #-------- Webshare stream URL --------
@@ -280,7 +280,7 @@ def add_movie_listitem(movie, addon_handle):
     li.setProperty('IsPlayable', 'true')
     xbmcplugin.addDirectoryItem(handle=addon_handle, url=url, listitem=li, isFolder=False)
 
-#-------- Pridanie položky do zoznamu pre seriály --------  
+#-------- Pridanie položky do zoznamu pre seriály --------
 def add_series_listitem(series, addon_handle):
     title = series.get("title", "Neznámy názov")
     first_air_date = series.get("first_air_date")  # očakávame rok ako int alebo string
@@ -334,7 +334,7 @@ def add_series_listitem(series, addon_handle):
     })
     li.setArt({'thumb': poster_url} if poster_url else {'thumb': 'DefaultTVShows.png'})
     xbmcplugin.addDirectoryItem(handle=addon_handle, url=url, listitem=li, isFolder=True)
-    
+
 def add_pagination_controls(page, total_count, per_page, query=None, action='show_movies'):
     # Hlavné menu
     url = build_url({'action': 'main_menu'})
@@ -402,7 +402,7 @@ def save_played_movie(item_id):
     history = history[:20]
     with open(MOVIE_HISTORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(history, f)
-        
+
 # -------- História prehrávaní seriálov --------
 def save_played_series(item_id):
     history = []
@@ -428,7 +428,7 @@ def load_played_movies():
             return json.load(f)
         except json.JSONDecodeError:
             return []
-        
+
 #-------- Načítanie histórie prehrávaní seriálov --------
 def load_played_series():
     if not os.path.exists(SERIE_HISTORY_FILE):
@@ -438,7 +438,7 @@ def load_played_series():
             return json.load(f)
         except json.JSONDecodeError:
             return []
-        
+
 # --------- Mazanie historie --------
 def clear_played_history():
     movie_deleted = False
@@ -520,28 +520,28 @@ def process_tmdb_search_results(query, page=1):
     """Process TMDB search results and verify against our database"""
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Výsledky vyhľadávania')
     xbmcplugin.setContent(ADDON_HANDLE, 'videos')
-    
+
     # Add "Go to main menu" as first item
     url = build_url({'action': 'main_menu'})
     li = xbmcgui.ListItem(label='[B]<< Prejdi na hlavné menu[/B]')
     li.setArt({'icon': 'DefaultFolderBack.png'})
     xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
-    
+
     # Get TMDB results
     tmdb_results = search_movie_tmdb(query)
     if not tmdb_results:
         xbmcgui.Dialog().notification("Info", "Nenašli sa žiadne výsledky.", xbmcgui.NOTIFICATION_INFO, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
-    
+
     # Verify against our DB and create combined results
     movies_found = []
     series_found = []
-    
+
     for item in tmdb_results:
         tmdb_id = item['tmdbId']
         media_type = item['mediaType']
-        
+
         if media_type == "movie":
             # Check movies collection
             movie = get_collection("movies").find_one({"tmdbId": tmdb_id, "status": 1})
@@ -552,45 +552,45 @@ def process_tmdb_search_results(query, page=1):
             series = get_collection("series").find_one({"tmdbId": tmdb_id})
             if series:
                 series_found.append(series)
-    
+
     # Pagination
     skip_count = (page - 1) * PER_PAGE
     all_results = movies_found + series_found
     total_results = len(all_results)
-    
+
     if not all_results:
         xbmcgui.Dialog().notification("Info", "Nenašli sa žiadne výsledky v tvojej knižnici.", xbmcgui.NOTIFICATION_INFO, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
-    
+
     # Add "Previous page" if needed
     if page > 1:
         prev_page_url = build_url({'action': 'search_results', 'query': query, 'page': page - 1})
         li = xbmcgui.ListItem(label='[B]< Predošlá strana[/B]')
         li.setArt({'icon': 'DefaultFolderBack.png'})
         xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=prev_page_url, listitem=li, isFolder=True)
-    
+
     # Display movies
     for movie in movies_found[skip_count:skip_count + PER_PAGE]:
         add_movie_listitem(movie, ADDON_HANDLE)
-    
+
     # Display series
     for series in series_found[skip_count:skip_count + PER_PAGE]:
         add_series_listitem(series, ADDON_HANDLE)
-    
+
     # Add "Next page" if needed
     if total_results > skip_count + PER_PAGE:
         next_page_url = build_url({'action': 'search_results', 'query': query, 'page': page + 1})
         li = xbmcgui.ListItem(label='[B]>> Ďalšia strana[/B]')
         xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=next_page_url, listitem=li, isFolder=True)
-    
+
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 def show_movies(query=None, page=1):
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Výsledky vyhľadávania' if query else 'Filmy')
     xbmcplugin.setContent(ADDON_HANDLE, 'videos')
     try:
-        
+
         if query is None:
             mongo_query = {"status": 1}
         elif isinstance(query, str):
@@ -602,7 +602,7 @@ def show_movies(query=None, page=1):
 
         skip_count = (page - 1) * PER_PAGE
         movies = get_collection("movies").find(mongo_query).sort("movieId", -1).skip(skip_count).limit(PER_PAGE)
-        
+
         # Pridaj navigáciu na začiatok
         add_pagination_controls(page, 0, PER_PAGE, query, action='show_movies')
 
@@ -626,11 +626,11 @@ def show_movies(query=None, page=1):
 def show_latest_movies(page=1):
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Najnovšie filmy')
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
-    
+
     skip_count = (page - 1) * PER_PAGE
-    
+
     movies = get_collection("movies").find({"status": 1}).sort("release_date", -1).skip(skip_count).limit(PER_PAGE)
-        
+
     movies_list = list(movies)
 
     # Navigácia hore
@@ -645,16 +645,16 @@ def show_latest_movies(page=1):
     add_pagination_controls(page, count, PER_PAGE, action='show_latest_movies')
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
-        
+
 # Zoznam filmov podla datumu vydaniapridania
 def show_latest_added_movies(page=1):
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Najnovšie pridané filmy')
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
-    
+
     skip_count = (page - 1) * PER_PAGE
-    
+
     movies = get_collection("movies").find({"status": 1}).sort("movieId", -1).skip(skip_count).limit(PER_PAGE)
-        
+
     movies_list = list(movies)
 
     # Navigácia hore
@@ -674,15 +674,15 @@ def show_latest_added_movies(page=1):
 def list_latest_series():
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Najnovšie seriály')
     xbmcplugin.setContent(ADDON_HANDLE, 'tvshows')
-    
+
     try:
-        
+
         # Add main menu link
         url = build_url({'action': 'main_menu'})
         li = xbmcgui.ListItem(label='[B]<< Prejdi na hlavné menu[/B]')
         li.setArt({'icon': 'DefaultFolderBack.png'})
         xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
-        
+
         # Get latest 50 series with available episodes
         series_with_episodes = get_collection("episodes").aggregate([
             {"$match": {"statusWS": 1}},
@@ -698,7 +698,7 @@ def list_latest_series():
             {"$sort": {"last_air_date": -1}},
             {"$limit": 50}
         ])
-        
+
         for s in series_with_episodes:
             title = s.get("title", "Neznámy názov")
             year = s.get("year")
@@ -707,14 +707,14 @@ def list_latest_series():
             serie_id = s.get("serieId")
             last_air_date = s.get("last_air_date", "")
             first_air_date = s.get("first_air_date", "")
-            
-            year2title = (first_air_date.split("-")[0] + (" - " + last_air_date.split("-")[0] 
-                  if last_air_date and last_air_date.split("-")[0] != first_air_date.split("-")[0] 
+
+            year2title = (first_air_date.split("-")[0] + (" - " + last_air_date.split("-")[0]
+                  if last_air_date and last_air_date.split("-")[0] != first_air_date.split("-")[0]
                   else "") if first_air_date else "")
-            
+
             url = build_url({'action': 'list_seasons', 'serieId': serie_id})
             label = f"{title} [B][COLOR white][{year2title}][/COLOR][/B]" if year2title else title
-            
+
             # Get audio languages
             audio_languages = get_collection("episodes").find({"serieId": serie_id}).distinct("audio")
             if audio_languages:
@@ -725,11 +725,11 @@ def list_latest_series():
                         if lang_code == "UND":
                             lang_code = "CZE"
                         processed_languages.add(lang_code)
-                
+
                 if processed_languages:
                     languages_str = ",".join(sorted(processed_languages))
                     label += f" [B][COLOR white]{languages_str}[/COLOR][/B]"
-            
+
             li = xbmcgui.ListItem(label=label)
             li.setInfo('video', {
                 'title': title,
@@ -740,7 +740,7 @@ def list_latest_series():
             if poster_url:
                 li.setArt({'thumb': poster_url})
             xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
-    
+
     except ConnectionFailure:
         xbmc.log("MongoDB connection failed in list_latest_series", xbmc.LOGERROR)
         xbmcgui.Dialog().notification("Chyba", "Problém s připojením k databázi", xbmcgui.NOTIFICATION_ERROR)
@@ -748,12 +748,12 @@ def list_latest_series():
         xbmc.log(f"Error in list_latest_series: {str(e)}", xbmc.LOGERROR)
     finally:
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
-        
+
 #-------- Najnovšie pridané seriály --------
 def list_latest_added_series(page=1):
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Najnovšie pridané seriály')
     xbmcplugin.setContent(ADDON_HANDLE, 'tvshows')
-    
+
     skip_count = (page - 1) * PER_PAGE
 
     # Get latest 50 series with available episodes
@@ -787,7 +787,7 @@ def list_latest_added_series(page=1):
     add_pagination_controls(page, count, PER_PAGE, action='list_latest_added_series')
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
- 
+
 # -------- Naposledy hľadané seriály--------
 def list_recent_searches():
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Naposledy hľadané')
@@ -825,7 +825,7 @@ def list_played_movies():
             add_movie_listitem(movie, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
-    
+
 #-------- Naposledy sledované seriály --------
 def list_played_series():
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Naposledy sledované seriály')
@@ -840,7 +840,7 @@ def list_played_series():
 
     for serie_id in history:
         series = get_collection("series").find_one({"serieId": serie_id})
-        
+
         add_series_listitem(series, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
@@ -939,7 +939,7 @@ def list_seasons(serieId):
 def list_episodes(serieId, seasonId):
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Epizódy')
     xbmcplugin.setContent(ADDON_HANDLE, 'episodes')
-    
+
     try:
         serieId = int(serieId)
         seasonId = int(seasonId)
@@ -1009,7 +1009,7 @@ def list_episodes(serieId, seasonId):
 
 def select_stream(movie_id):
     global webshare_token
-    
+
     try:
         movie_id = int(movie_id)
     except ValueError:
@@ -1017,7 +1017,7 @@ def select_stream(movie_id):
         xbmcgui.Dialog().notification("Chyba", "Neplatné ID filmu.", xbmcgui.NOTIFICATION_ERROR, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
-    
+
     # Get or refresh token with 10-hour validity
     token = get_webshare_token()
     if not token:
@@ -1025,11 +1025,13 @@ def select_stream(movie_id):
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    details = list(get_collection("movie_detail").find({"fkMovieId": movie_id}).sort("size", -1))
+    details = list(get_collection("movie_detail").find({"fkMovieId": movie_id}))
     if not details:
         xbmcgui.Dialog().notification("Žiadne súbory", "Pre tento film nie sú dostupné žiadne súbory.", xbmcgui.NOTIFICATION_INFO, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
+
+    details.sort(key=lambda x: float(x["size"].replace(" GB", "")), reverse=True)
 
     # Get movie details for thumbnail
     movie_info = get_collection("movies").find_one({"movieId": movie_id})
@@ -1045,12 +1047,12 @@ def select_stream(movie_id):
         bitrate = file.get("bitrate", "N/A")
         video_codec = file.get("videoCodec", "N/A")
         filename = file.get("name", "N/A")
-        
+
         scrollable_filename = f"[COLOR FFFF00FF]{filename}[/COLOR]" if filename else ""
         li = xbmcgui.ListItem(label=f"[B]{resolution}[/B]  •  [COLOR FF00FF00]{size}[/COLOR]  •  {scrollable_filename}")
         li.setLabel2(f"[COLOR FFFFCC00]{', '.join(audio_streams)}[/COLOR] • {bitrate} • {video_codec}")
         li.setArt({'thumb': default_thumb, 'icon': 'DefaultAddonVideo.png'})
-        
+
         items.append(li)
 
     index = dialog.select(
@@ -1058,7 +1060,7 @@ def select_stream(movie_id):
         items,
         useDetails=True
     )
-        
+
     if index >= 0:
         selected_ident = details[index].get("ident")
         play_url = get_webshare_stream_url(selected_ident, token)
@@ -1080,7 +1082,7 @@ def select_stream(movie_id):
 
             # Optional but helpful for movie handling
             info_tag.setMediaType("movie")
-            
+
             # Set art
             li.setArt({
                 'thumb': default_thumb,
@@ -1090,16 +1092,16 @@ def select_stream(movie_id):
 
             # Now resolve the URL for Kodi to handle playback
             xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
-            
+
             save_played_movie(movie_id)
         else:
             xbmcgui.Dialog().notification("Chyba", "Nepodarilo sa získať URL pre prehrávanie.", xbmcgui.NOTIFICATION_ERROR, 3000)
-    
+
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
-   
+
 def select_stream_serie(episodeId):
     global webshare_token
-    
+
     try:
         episodeId = int(episodeId)
     except ValueError:
@@ -1107,7 +1109,7 @@ def select_stream_serie(episodeId):
         xbmcgui.Dialog().notification("Chyba", "Neplatné ID epizódy.", xbmcgui.NOTIFICATION_ERROR, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
-    
+
     # Get or refresh token with 10-hour validity
     token = get_webshare_token()
     if not token:
@@ -1116,13 +1118,15 @@ def select_stream_serie(episodeId):
         return
 
     # Get all available files for this episode
-    details = list(get_collection("episode_detail_links").find({"episodeId": episodeId}).sort("size", -1))
+    details = list(get_collection("episode_detail_links").find({"episodeId": episodeId}))
     # Check if details are empty
     if not details:
         xbmcgui.Dialog().notification("Žiadne súbory", "Pre túto epizódu nie sú dostupné súbory.", xbmcgui.NOTIFICATION_INFO, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
-    
+
+    details.sort(key=lambda x: float(x["size"].replace(" GB", "")), reverse=True)
+
     # Get serie for thumbnail
     episode = get_collection("episodes").find_one({"episodeId": episodeId})
     serieId = episode.get("serieId")
@@ -1147,13 +1151,13 @@ def select_stream_serie(episodeId):
 
         # Create the ListItem with filename
         li = xbmcgui.ListItem(label=f"[B]{resolution}[/B]  •  [COLOR FF00FF00]{size}[/COLOR]  •  {scrollable_filename}")
-        
+
         # Second line (info line)
         li.setLabel2(f"[COLOR FFFFCC00]{', '.join(audio_streams)}[/COLOR] • {bitrate} • {video_codec}")
-        
+
         # Set thumbnail (use actual thumbnails if available)
         li.setArt({'thumb': defualt_thumb_ep, 'icon': 'DefaultAddonVideo.png'})
-        
+
         # Convert size to MB for internal use (handles "3.01 GB" format)
         size_mb = 0
         try:
@@ -1164,14 +1168,14 @@ def select_stream_serie(episodeId):
                 size_mb = int(size_num)
         except (ValueError, IndexError):
             pass
-        
+
         # Set additional info for skins that support it
         li.setInfo('video', {
             'size': size_mb,
             'video_codec': video_codec,
             'audio_codec': ', '.join(audio_streams)
         })
-        
+
         items.append(li)
 
     # Use select dialog with ListItems for better visual presentation
@@ -1206,14 +1210,14 @@ def select_stream_serie(episodeId):
                 "poster": defualt_thumb_ep,
                 "icon": "DefaultVideo.png"
             })
-            
+
             xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, listitem=li)
-            
+
             save_played_series(serieId)
-            
+
         else:
             xbmcgui.Dialog().notification("Chyba", "Nepodarilo sa získať URL pre prehrávanie.", xbmcgui.NOTIFICATION_ERROR, 3000)
-    
+
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 # CSFD typy na dnes
@@ -1255,7 +1259,7 @@ def typy_na_dnes_csfd():
 
         if not movie:
             continue
-        
+
         add_movie_listitem(movie, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
@@ -1269,15 +1273,15 @@ if action == 'select_stream':
     if token:
         select_stream(params.get('movieId'))
     else:
-        xbmcgui.Dialog().notification("Error", "Login failed", xbmcgui.NOTIFICATION_ERROR) 
+        xbmcgui.Dialog().notification("Error", "Login failed", xbmcgui.NOTIFICATION_ERROR)
 elif action == 'select_stream_serie':
     token = get_webshare_token()  # Will only refresh if expired
     if token:
         select_stream_serie(params.get('episodeId'))
     else:
-        xbmcgui.Dialog().notification("Error", "Login failed", xbmcgui.NOTIFICATION_ERROR) 
+        xbmcgui.Dialog().notification("Error", "Login failed", xbmcgui.NOTIFICATION_ERROR)
 elif action == 'recent_searches':
-    list_recent_searches() 
+    list_recent_searches()
 elif action == 'recently_played':
     list_played_movies()
 elif action == 'recently_played_series':
@@ -1289,20 +1293,20 @@ elif action == 'list_movies':
 elif action == 'show_movies':
     page = int(params.get('page', '1'))
     query = params.get('query')
-    show_movies(query=query, page=page) 
+    show_movies(query=query, page=page)
 elif action == 'clear_search_history':
     if xbmcgui.Dialog().yesno("Potvrdenie", "Naozaj chceš vymazať históriu hľadania?"):
         clear_search_history()
 elif action == 'clear_played_history':
     if xbmcgui.Dialog().yesno("Potvrdenie", "Naozaj chceš vymazať naposledy sledované?"):
-        clear_played_history()    
+        clear_played_history()
 elif action == 'list_series':
     page = int(params.get('page', '1'))
     list_series(page=page)
 elif action == 'list_seasons':
-    list_seasons(params.get('serieId')) 
+    list_seasons(params.get('serieId'))
 elif action == 'list_episodes':
-    list_episodes(params.get('serieId'), params.get('seasonId')) 
+    list_episodes(params.get('serieId'), params.get('seasonId'))
 elif action == 'search':
     if 'query' in params:
         search_text = params['query']
