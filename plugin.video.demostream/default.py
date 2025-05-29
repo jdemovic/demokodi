@@ -228,10 +228,14 @@ def get_webshare_stream_url(ident, token):
             response_text = response.read().decode("utf-8")
             link_dict = parse_xml_response(response_text)
             if link_dict.get("status") != "OK":
+                # 👇 Skúsime obnoviť token a znova to skúsiť
                 xbmc.log(f"❌ Webshare nevrátil OK pre ident {ident}", xbmc.LOGERROR)
+                new_token = get_webshare_token()
+                if new_token and new_token != token:
+                    return get_webshare_stream_url(ident, new_token)
                 return None
-            xbmc.log(f"✅ Webshare stream URL pre ident {ident}: bol úspešne získaný", xbmc.LOGINFO)
             return link_dict.get("link")
+
     except Exception as e:
         xbmc.log(f"❌ Chyba pri načítaní odkazu pre ident {ident}: {e}", xbmc.LOGERROR)
         return None
