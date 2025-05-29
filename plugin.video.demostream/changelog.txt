@@ -1,3 +1,6 @@
+Version 0.9.4
+- Pridene default TMDB API Key ako technicke konto (nezneužívať mimo plugin, lebo sa to blokne)
+
 Version 0.9.3
 - Zmena poradia výberu streamov: zoradenie podľa rozlíšenia/veľkosti (od najväčšieho)
 
