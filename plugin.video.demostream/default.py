@@ -89,6 +89,15 @@ webshare_url = addon.getSetting("webshare_url")
 REALM = ":Webshare:"
 webshare_token = None
 
+# Definuj vlastné poradie pre rozlíšenie
+resolution_order = {
+    "4K": 5,
+    "FHD": 4,
+    "HD": 3,
+    "SD": 2,
+    "480p": 1
+}
+
 # Initialize MongoDB connection
 db_connection = MongoDBConnection()
 db = db_connection.get_db()
@@ -1031,7 +1040,14 @@ def select_stream(movie_id):
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    details.sort(key=lambda x: float(x["size"].replace(" GB", "")), reverse=True)
+    # Sort najprv podľa rozlíšenia (custom poradie), potom podľa veľkosti (ako float)
+    details.sort(
+        key=lambda x: (
+            resolution_order.get(x.get("resolution", ""), 0),  # predvolené 0 ak chýba
+            float(x.get("size", "0").replace(" GB", ""))
+        ),
+        reverse=True  # zoradenie od najvyššieho rozlíšenia a veľkosti
+    )
 
     # Get movie details for thumbnail
     movie_info = get_collection("movies").find_one({"movieId": movie_id})
@@ -1125,7 +1141,14 @@ def select_stream_serie(episodeId):
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    details.sort(key=lambda x: float(x["size"].replace(" GB", "")), reverse=True)
+    # Sort najprv podľa rozlíšenia (custom poradie), potom podľa veľkosti (ako float)
+    details.sort(
+        key=lambda x: (
+            resolution_order.get(x.get("resolution", ""), 0),  # predvolené 0 ak chýba
+            float(x.get("size", "0").replace(" GB", ""))
+        ),
+        reverse=True  # zoradenie od najvyššieho rozlíšenia a veľkosti
+    )
 
     # Get serie for thumbnail
     episode = get_collection("episodes").find_one({"episodeId": episodeId})
