@@ -253,12 +253,12 @@ def add_movie_listitem(movie, addon_handle):
                     if lang:
                         lang_code = re.split(r'[\(\)]', lang)[0].strip().upper()
                         if lang_code == "UND":
-                            lang_code = "CZE"
+                            lang_code = "UND"
                         processed_languages.add(lang_code)
             elif isinstance(lang_entry, str):
                 lang_code = re.split(r'[\(\)]', lang_entry)[0].strip().upper()
                 if lang_code == "UND":
-                    lang_code = "CZE"
+                    lang_code = "UND"
                 processed_languages.add(lang_code)
 
         if processed_languages:
@@ -723,7 +723,7 @@ def list_latest_series():
                     if lang:
                         lang_code = re.split(r'[\(\)]', lang)[0].strip().upper()
                         if lang_code == "UND":
-                            lang_code = "CZE"
+                            lang_code = "UND"
                         processed_languages.add(lang_code)
 
                 if processed_languages:
