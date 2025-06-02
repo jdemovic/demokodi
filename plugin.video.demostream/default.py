@@ -25,6 +25,7 @@ from pymongo.errors import ConnectionFailure
 from urllib.parse import parse_qsl
 from urllib import request, parse
 from tmdb.searchTMDBMulti import search_movie_tmdb
+from resources.lib.webshare_client import WebshareClient
 
 try:
     from xbmc import translatePath
@@ -82,12 +83,9 @@ mongodb_user = addon.getSetting("mongodb_user")
 mongodb_pass = addon.getSetting("mongodb_pass")
 mongodb_host = addon.getSetting("mongodb_host")
 mongodb_db = addon.getSetting("mongodb_db")
+
 # webshare settings
-webshare_user = addon.getSetting("webshare_user")
-webshare_pass = addon.getSetting("webshare_pass")
-webshare_url = addon.getSetting("webshare_url")
-REALM = ":Webshare:"
-webshare_token = None
+ws = WebshareClient()
 
 # Definuj vlastné poradie pre rozlíšenie
 resolution_order = {
@@ -116,135 +114,6 @@ genre_dict = {
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
 PER_PAGE = 20  # počet poloziek na jednu stranu
-HEADERS = {
-    "Content-Type": "application/x-www-form-urlencoded",
-    "Accept": "text/xml"
-}
-
-#-------- XML parsovanie --------
-def parse_xml_response(text):
-    try:
-        root = ET.fromstring(text)
-        return {child.tag: child.text for child in root}
-    except Exception as e:
-        xbmc.log(f"❌ Chyba pri XML parsovaní: {e}", xbmc.LOGERROR)
-        return {}
-
-#-------- Webshare login --------
-def webshare_login():
-    global webshare_token
-    try:
-        print("🔐 Získavam salt z Webshare...")
-
-        salt_payload = urllib.parse.urlencode({"username_or_email": webshare_user}).encode("utf-8")
-        salt_req = urllib.request.Request(f"{webshare_url}salt/", data=salt_payload, headers=HEADERS)
-        with urllib.request.urlopen(salt_req) as response:
-            salt_response = response.read().decode("utf-8")
-        salt_dict = parse_xml_response(salt_response)
-        salt = salt_dict.get("salt")
-        if not salt:
-            xbmc.log("❌ Nepodarilo sa získať salt.", xbmc.LOGERROR)
-            return
-
-        xbmc.log(f"✅ Salt úspešne získaný. Salt: {salt}", xbmc.LOGINFO)
-
-        encrypted_pass = hashlib.sha1(md5crypt(webshare_pass.encode('utf-8'), salt.encode('utf-8')).encode('utf-8')).hexdigest()
-        pass_digest = hashlib.md5((webshare_user + REALM + webshare_pass).encode('utf-8')).hexdigest()
-
-        login_payload = {
-            "username_or_email": webshare_user,
-            "password": encrypted_pass,
-            "digest": pass_digest
-        }
-
-        xbmc.log("🔐 Prihlasujem sa do Webshare...", xbmc.LOGINFO)
-        login_data = urllib.parse.urlencode(login_payload).encode("utf-8")
-        login_req = urllib.request.Request(f"{webshare_url}login/", data=login_data, headers=HEADERS)
-
-        with urllib.request.urlopen(login_req) as response:
-            login_response = response.read().decode("utf-8")
-        login_dict = parse_xml_response(login_response)
-        if login_dict.get("status") != "OK" or not login_dict.get("token"):
-            xbmc.log(f"❌ Prihlásenie zlyhalo: {login_response}", xbmc.LOGERROR)
-            xbmcgui.Dialog().notification("Webshare", "Prihlásenie zlyhalo.", xbmcgui.NOTIFICATION_ERROR)
-            webshare_token = None
-            return
-
-        webshare_token = login_dict.get("token")
-        if webshare_token:
-            # Store token with 10-hour validity
-            # Set expiration to 10 hours from now
-            expiry_time = datetime.now() + timedelta(hours=10)
-            addon.setSetting("token_expiry", expiry_time.isoformat())
-            addon.setSetting("webshare_token", webshare_token)
-            xbmc.log(f"✅ Token valid until: {expiry_time}", xbmc.LOGINFO)
-        return True
-
-    except Exception as e:
-        xbmc.log(f"❌ Výnimka pri prihlasovaní do Webshare: {e}", xbmc.LOGERROR)
-
-#-------- Token validácia --------
-def is_token_valid():
-    """Check if stored token is still valid"""
-    try:
-        token = addon.getSetting("webshare_token")
-        expiry_str = addon.getSetting("token_expiry")
-
-        if not token or not expiry_str:
-            return False
-
-        expiry_time = datetime.fromisoformat(expiry_str)
-        return datetime.now() < expiry_time
-    except Exception as e:
-        xbmc.log(f"Token validation error: {str(e)}", xbmc.LOGERROR)
-        return False
-
-#-------- Token získanie --------
-def get_webshare_token():
-    """Get valid token without unnecessary refresh"""
-    global webshare_token
-
-    # Return valid in-memory token if available
-    if webshare_token and is_token_valid():
-        return webshare_token
-
-    # Check stored token
-    stored_token = addon.getSetting("webshare_token")
-    if stored_token and is_token_valid():
-        webshare_token = stored_token
-        return webshare_token
-
-    # Only login if token is missing or expired
-    if webshare_login():
-        return webshare_token
-
-    return None
-
-#-------- Webshare stream URL --------
-def get_webshare_stream_url(ident, token):
-    url = webshare_url + "file_link/"
-    payload = {"ident": ident, "wst": token}
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    data = urllib.parse.urlencode(payload).encode("utf-8")
-
-    req = urllib.request.Request(url, data=data, headers=headers)
-
-    try:
-        with urllib.request.urlopen(req) as response:
-            response_text = response.read().decode("utf-8")
-            link_dict = parse_xml_response(response_text)
-            if link_dict.get("status") != "OK":
-                # 👇 Skúsime obnoviť token a znova to skúsiť
-                xbmc.log(f"❌ Webshare nevrátil OK pre ident {ident}", xbmc.LOGERROR)
-                new_token = get_webshare_token()
-                if new_token and new_token != token:
-                    return get_webshare_stream_url(ident, new_token)
-                return None
-            return link_dict.get("link")
-
-    except Exception as e:
-        xbmc.log(f"❌ Chyba pri načítaní odkazu pre ident {ident}: {e}", xbmc.LOGERROR)
-        return None
 
 def format_time(seconds):
     mins, secs = divmod(int(seconds), 60)
@@ -1045,20 +914,12 @@ def list_episodes(serieId, seasonId):
 
 
 def select_stream(movie_id):
-    global webshare_token
 
     try:
         movie_id = int(movie_id)
     except ValueError:
         xbmc.log(f"movie_id nie je číslo: {movie_id}", xbmc.LOGERROR)
         xbmcgui.Dialog().notification("Chyba", "Neplatné ID filmu.", xbmcgui.NOTIFICATION_ERROR, 3000)
-        xbmcplugin.endOfDirectory(ADDON_HANDLE)
-        return
-
-    # Get or refresh token with 10-hour validity
-    token = get_webshare_token()
-    if not token:
-        xbmcgui.Dialog().notification("Chyba", "Webshare prihlásenie zlyhalo.", xbmcgui.NOTIFICATION_ERROR, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
@@ -1107,7 +968,7 @@ def select_stream(movie_id):
 
     if index >= 0:
         selected_ident = details[index].get("ident")
-        play_url = get_webshare_stream_url(selected_ident, token)
+        play_url = ws.get_stream_url(selected_ident)
         if play_url:
             xbmc.log(f"Prehrávam film: {movie_info.get('title', 'Neznámy film')}", xbmc.LOGDEBUG)
 
@@ -1151,13 +1012,6 @@ def select_stream_serie(episodeId):
     except ValueError:
         xbmc.log(f"episodeId nie je číslo: {episodeId}", xbmc.LOGERROR)
         xbmcgui.Dialog().notification("Chyba", "Neplatné ID epizódy.", xbmcgui.NOTIFICATION_ERROR, 3000)
-        xbmcplugin.endOfDirectory(ADDON_HANDLE)
-        return
-
-    # Get or refresh token with 10-hour validity
-    token = get_webshare_token()
-    if not token:
-        xbmcgui.Dialog().notification("Chyba", "Webshare prihlásenie zlyhalo.", xbmcgui.NOTIFICATION_ERROR, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
@@ -1238,7 +1092,7 @@ def select_stream_serie(episodeId):
 
     if index >= 0:
         selected_ident = details[index].get("ident")
-        play_url = get_webshare_stream_url(selected_ident, token)
+        play_url = ws.get_stream_url(selected_ident)
         if play_url:
             li = xbmcgui.ListItem(label=episode.get("name", "Neznámy epizódy"), path=play_url)
             li.setProperty("IsPlayable", "true")
@@ -1320,17 +1174,9 @@ action = params.get('action')
 
 # Router - Main control flow
 if action == 'select_stream':
-    token = get_webshare_token()  # Will only refresh if expired
-    if token:
-        select_stream(params.get('movieId'))
-    else:
-        xbmcgui.Dialog().notification("Error", "Login failed", xbmcgui.NOTIFICATION_ERROR)
+    select_stream(params.get('movieId'))
 elif action == 'select_stream_serie':
-    token = get_webshare_token()  # Will only refresh if expired
-    if token:
-        select_stream_serie(params.get('episodeId'))
-    else:
-        xbmcgui.Dialog().notification("Error", "Login failed", xbmcgui.NOTIFICATION_ERROR)
+    select_stream_serie(params.get('episodeId'))
 elif action == 'recent_searches':
     list_recent_searches()
 elif action == 'recently_played':
@@ -1386,5 +1232,4 @@ elif action == 'typy_na_dnes_csfd':
     typy_na_dnes_csfd()
 else:
     # Initial login and main menu
-    webshare_login()
     main_menu()

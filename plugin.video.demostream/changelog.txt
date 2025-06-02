@@ -1,3 +1,6 @@
+Version 0.9.7
+- Presunutie WS casti do samostatneho suboru a class
+
 Version 0.9.6
 - Pridané hodnotenie v názve filmu ako aj v jeho detaile
 - pridany fanart pri detaile filmu cez "i"
