@@ -106,6 +106,12 @@ db = db_connection.get_db()
 def get_collection(collection_name):
     return db[collection_name]
 
+# Načítaj žánrový číselník pri štarte
+genre_dict = {
+    str(g["id"]): g["name"]
+    for g in get_collection("movie_genres").find()
+}
+
 # Log adresárov a vytvorenie priečinka
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
@@ -251,28 +257,25 @@ def add_movie_listitem(movie, addon_handle):
     movie_id = movie.get("movieId")
     poster_url = movie.get("posterUrl")
     overview = movie.get("overview", "Žiadny popis k dispozícii.")
+    vote = movie.get("vote_average")
+    release_date = movie.get("release_date")
 
     url = build_url({'action': 'select_stream', 'movieId': movie_id})
 
-    # Získanie audio jazykov
+    # Načítanie jazykov
     languages_str = ""
     try:
         audio_languages = get_collection("movie_detail").find({"fkMovieId": movie_id}).distinct("audio")
         processed_languages = set()
-
         for lang_entry in audio_languages:
             if isinstance(lang_entry, list):
                 for lang in lang_entry:
                     if lang:
                         lang_code = re.split(r'[\(\)]', lang)[0].strip().upper()
-                        if lang_code == "UND":
-                            lang_code = "UND"
-                        processed_languages.add(lang_code)
+                        processed_languages.add(lang_code if lang_code != "UND" else "UND")
             elif isinstance(lang_entry, str):
                 lang_code = re.split(r'[\(\)]', lang_entry)[0].strip().upper()
-                if lang_code == "UND":
-                    lang_code = "UND"
-                processed_languages.add(lang_code)
+                processed_languages.add(lang_code if lang_code != "UND" else "UND")
 
         if processed_languages:
             languages_str = f" [COLOR deepskyblue]{', '.join(sorted(processed_languages))}[/COLOR]"
@@ -280,15 +283,36 @@ def add_movie_listitem(movie, addon_handle):
     except Exception as e:
         xbmc.log(f"Chyba pri získavaní jazykov pre movieId {movie_id}: {str(e)}", xbmc.LOGWARNING)
 
+    # ❗ Získanie žánrov zo zoznamu ID
+    genre_names = [genre_dict.get(str(gid), f"Žáner {gid}") for gid in movie.get("genres", [])]
+
     # Formátovaný label
     label = f"[B]{title}[/B]"
     if year:
         label += f" [COLOR grey]({year})[/COLOR]"
+    if vote:
+        label += f" [COLOR gold]{vote:.1f}★[/COLOR]"
     label += languages_str
 
+    # Video info
+    info = {
+        'title': title,
+        'year': int(year) if year and str(year).isdigit() else None,
+        'plot': overview,
+        'rating': float(vote) if vote else None,
+        'premiered': release_date if release_date else None,
+        'genre': ", ".join(genre_names) if genre_names else None
+    }
+
     li = xbmcgui.ListItem(label=label)
-    li.setInfo('video', {'title': title, 'year': year, 'plot': overview})
-    li.setArt({'thumb': poster_url} if poster_url else {'thumb': 'DefaultVideo.png'})
+    li.setInfo('video', info)
+    # Poster / Fanart / Thumb
+    art = {
+        'thumb': poster_url or 'DefaultVideo.png',
+        'poster': poster_url or 'DefaultVideo.png',
+        'fanart': poster_url or 'DefaultVideo.png'
+    }
+    li.setArt(art)
     li.setProperty('movie_id', str(movie_id))
     li.setProperty('IsPlayable', 'true')
     xbmcplugin.addDirectoryItem(handle=addon_handle, url=url, listitem=li, isFolder=False)

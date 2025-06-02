@@ -1,5 +1,9 @@
-Version 0.9.4
-- Uprava pri ziskavani tokenu z WS, kde sa mohol tento z dovodu necinnosti zneplatint
+Version 0.9.6
+- Pridané hodnotenie v názve filmu ako aj v jeho detaile
+- pridany fanart pri detaile filmu cez "i"
+
+Version 0.9.5
+- Uprava pri ziskavani tokenu z WS, kde sa mohol tento z dovodu necinnosti zneplatnit
 
 Version 0.9.4
 - Pridene default TMDB API Key ako technicke konto (nezneužívať mimo plugin, lebo sa to blokne)
