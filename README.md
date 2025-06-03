@@ -25,7 +25,7 @@ Slúži ako zdroj pre inštaláciu a aktualizáciu vlastných doplnkov cez Kodi.
 ### Možnosť 2: Inštalácia cez URL zdroj v Správcovi súborov
 
 1. Otvor Kodi a prejdite do **Nastavenia > Správca súborov**.
-2. Zvoľ **Pridať zdroj** a ako cestu zadaj: https://jdemovic.github.io/demokodi/
+2. Zvoľ **Pridať zdroj** a ako cestu zadaj: https://repo.demolator.app/
 3. Pomenuj zdroj napríklad `demokodi` a potvrď.
 4. Vráť sa späť do **Doplnky > Inštalovať zo ZIP súboru** a vyber pridaný zdroj `demokodi`.
 5. Nainštaluj súbor `repository.demolator-1.0.0.zip`.
@@ -38,7 +38,7 @@ Slúži ako zdroj pre inštaláciu a aktualizáciu vlastných doplnkov cez Kodi.
 
 ## Vývoj a úpravy
 
-Skript `generate_addons.py` slúži na generovanie súborov `addons.xml` a `addons.xml.md5` na základe obsahu repozitára.  
+Skript `generate_addons.py` slúži na generovanie súborov `addons.xml` a `addons.xml.md5` na základe obsahu repozitára.
 Skript `create_repository.py` pomáha s vytváraním štruktúry repozitára a balením doplnkov.
 
 ## Licencia
