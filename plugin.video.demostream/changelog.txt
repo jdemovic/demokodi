@@ -1,3 +1,6 @@
+Version 0.9.8
+- Presunutie CSFD casti do samostatneho suboru
+
 Version 0.9.7
 - Presunutie WS casti do samostatneho suboru a class
 

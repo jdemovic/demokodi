@@ -26,6 +26,7 @@ from urllib.parse import parse_qsl
 from urllib import request, parse
 from tmdb.searchTMDBMulti import search_movie_tmdb
 from resources.lib.webshare_client import WebshareClient
+from resources.lib.csfd_client import fetch_csfd_tip_titles
 
 try:
     from xbmc import translatePath
@@ -1130,44 +1131,34 @@ def typy_na_dnes_csfd():
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Tipy na dnes (ČSFD)')
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
-    url = "https://www.csfd.cz/televize/"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    req = urllib.request.Request(url, headers=headers)
+    results = fetch_csfd_tip_titles()
 
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            html = response.read().decode("utf-8")
-    except Exception as e:
-        xbmcgui.Dialog().ok("Chyba načítania", f"Nepodarilo sa načítať stránku ČSFD: {e}")
+    if isinstance(results, dict) and results.get("error"):
+        xbmcgui.Dialog().ok("Chyba", results["error"])
         return
 
-    # Regulačný výraz na získanie názvu filmu a roka
-    pattern = r'<a href="/film/\d+-[^/]+/" class="film-title-name">([^<]+)</a>\s*<span class="film-title-info"><span class="info">\((\d{4})\)</span></span>'
-    matches = re.findall(pattern, html, re.DOTALL)
-
-    if not matches:
-        xbmcgui.Dialog().ok("Žiadne tipy", "Neboli nájdené žiadne tipy na dnes.")
+    if not results:
+        xbmcgui.Dialog().ok("Žiadne tipy", "Neboli nájdené žiadne tipy z CSFD na dnes.")
         return
 
-    for csfd_title, year in matches:
-        title_clean = csfd_title.strip()
-        xbmc.log(f"Hľadám film: {title_clean} ({year})", xbmc.LOGINFO)
+    for item in results:
+        title = item["title"]
+        year = item["year"]
+        xbmc.log(f"Hľadám film: {title} ({year})", xbmc.LOGINFO)
 
         query = {
-            "title": {"$regex": f"^{re.escape(title_clean)}$", "$options": "i"}
+            "title": {"$regex": f"^{re.escape(title)}$", "$options": "i"},
+            "year": year
         }
 
-        if year and isinstance(year, str) and year.isdigit():
-            query["year"] = year  # pridáš ako string
-
         movie = get_collection("movies").find_one(query)
-
         if not movie:
             continue
 
         add_movie_listitem(movie, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
+
 
 params = dict(parse_qsl(sys.argv[2][1:]))
 action = params.get('action')
