@@ -1,3 +1,6 @@
+Version 0.9.9
+- Pridana moznost vymazat neexistujuce streamy/identy z DB (boli ostranene z WS) - len ak ma uzivatel opravnenie
+
 Version 0.9.8
 - Presunutie CSFD casti do samostatneho suboru
 

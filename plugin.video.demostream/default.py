@@ -969,39 +969,62 @@ def select_stream(movie_id):
 
     if index >= 0:
         selected_ident = details[index].get("ident")
-        play_url = ws.get_stream_url(selected_ident)
-        if play_url:
-            xbmc.log(f"Prehrávam film: {movie_info.get('title', 'Neznámy film')}", xbmc.LOGDEBUG)
+        play_url = ws.get_stream_url(ident=selected_ident, mongo_collection=get_collection("movie_detail"))
+        
+        if play_url == "deleted":
+            xbmcgui.Dialog().notification("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO)
+            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+            return
 
-            list_item = xbmcgui.ListItem(label=movie_info.get('title', 'Neznámy film'))
-            list_item.setPath(play_url)
-            list_item.setProperty('IsPlayable', 'true')
+        elif play_url == "unauthorized":
+            xbmcgui.Dialog().notification("Prístup odmietnutý", "Nemáš práva na mazanie z databázy.", xbmcgui.NOTIFICATION_ERROR)
+            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+            return
 
-            # Modern Kodi: use InfoTagVideo instead of deprecated setInfo
-            info_tag = list_item.getVideoInfoTag()
-            info_tag.setTitle(movie_info.get("title", "Neznámy film"))
-            info_tag.setPlot(movie_info.get("overview", ""))
-            try:
-                info_tag.setYear(int(movie_info.get("year", 0)))
-            except:
-                xbmc.log(f"Neplatný rok: {movie_info.get('year', 'N/A')}", xbmc.LOGERROR)
+        elif play_url == "delete_error":
+            xbmcgui.Dialog().notification("Chyba", "Mazanie z databázy zlyhalo.", xbmcgui.NOTIFICATION_ERROR)
+            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+            return
 
-            # Optional but helpful for movie handling
-            info_tag.setMediaType("movie")
+        elif play_url == "not_found":
+            xbmcgui.Dialog().notification("Nenájdené", "Záznam s ident sa nenašiel.", xbmcgui.NOTIFICATION_INFO)
+            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+            return
 
-            # Set art
-            li.setArt({
-                'thumb': default_thumb,
-                'poster': default_thumb,
-                'fanart': default_thumb
-            })
+        elif not play_url:
+            xbmcgui.Dialog().notification("Stream URL", "Nepodarilo sa získať stream URL.", xbmcgui.NOTIFICATION_ERROR)
+            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+            return
 
-            # Now resolve the URL for Kodi to handle playback
-            xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
+        xbmc.log(f"Prehrávam film: {movie_info.get('title', 'Neznámy film')}", xbmc.LOGDEBUG)
 
-            save_played_movie(movie_id)
-        else:
-            xbmcgui.Dialog().notification("Chyba", "Nepodarilo sa získať URL pre prehrávanie.", xbmcgui.NOTIFICATION_ERROR, 3000)
+        list_item = xbmcgui.ListItem(label=movie_info.get('title', 'Neznámy film'))
+        list_item.setPath(play_url)
+        list_item.setProperty('IsPlayable', 'true')
+
+        # Modern Kodi: use InfoTagVideo instead of deprecated setInfo
+        info_tag = list_item.getVideoInfoTag()
+        info_tag.setTitle(movie_info.get("title", "Neznámy film"))
+        info_tag.setPlot(movie_info.get("overview", ""))
+        try:
+            info_tag.setYear(int(movie_info.get("year", 0)))
+        except:
+            xbmc.log(f"Neplatný rok: {movie_info.get('year', 'N/A')}", xbmc.LOGERROR)
+
+        # Optional but helpful for movie handling
+        info_tag.setMediaType("movie")
+
+        # Set art
+        li.setArt({
+            'thumb': default_thumb,
+            'poster': default_thumb,
+            'fanart': default_thumb
+        })
+
+        # Now resolve the URL for Kodi to handle playback
+        xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
+
+        save_played_movie(movie_id)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
@@ -1093,36 +1116,58 @@ def select_stream_serie(episodeId):
 
     if index >= 0:
         selected_ident = details[index].get("ident")
-        play_url = ws.get_stream_url(selected_ident)
-        if play_url:
-            li = xbmcgui.ListItem(label=episode.get("name", "Neznámy epizódy"), path=play_url)
-            li.setProperty("IsPlayable", "true")
+        play_url = ws.get_stream_url(ident=selected_ident, mongo_collection=get_collection("episode_detail_links"))
+        
+        if play_url == "deleted":
+            xbmcgui.Dialog().notification("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO)
+            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+            return
 
-            # Add basic metadata
-            li.setInfo("video", {
-                "title": episode.get("name", ""),
-                "season": season.get("season_number", 1),
-                "episode": episode.get("episode_number", 1),
-                "tvshowtitle": serie_info.get("title", ""),
-                "genre": serie_info.get("genres", ""),
-                "year": serie_info.get("year", ""),
-                "plot": episode.get("overview", ""),
-                "playcount": 0  # Kodi manages this automatically isf omitted
-            })
+        elif play_url == "unauthorized":
+            xbmcgui.Dialog().notification("Prístup odmietnutý", "Nemáš práva na mazanie z databázy.", xbmcgui.NOTIFICATION_ERROR)
+            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+            return
 
-            # Optional thumbnail/poster
-            li.setArt({
-                "thumb": defualt_thumb_ep,
-                "poster": defualt_thumb_ep,
-                "icon": "DefaultVideo.png"
-            })
+        elif play_url == "delete_error":
+            xbmcgui.Dialog().notification("Chyba", "Mazanie z databázy zlyhalo.", xbmcgui.NOTIFICATION_ERROR)
+            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+            return
 
-            xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, listitem=li)
+        elif play_url == "not_found":
+            xbmcgui.Dialog().notification("Nenájdené", "Záznam s ident sa nenašiel.", xbmcgui.NOTIFICATION_INFO)
+            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+            return
 
-            save_played_series(serieId)
+        elif not play_url:
+            xbmcgui.Dialog().notification("Stream URL", "Nepodarilo sa získať stream URL.", xbmcgui.NOTIFICATION_ERROR)
+            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+            return
 
-        else:
-            xbmcgui.Dialog().notification("Chyba", "Nepodarilo sa získať URL pre prehrávanie.", xbmcgui.NOTIFICATION_ERROR, 3000)
+        li = xbmcgui.ListItem(label=episode.get("name", "Neznámy epizódy"), path=play_url)
+        li.setProperty("IsPlayable", "true")
+
+        # Add basic metadata
+        li.setInfo("video", {
+            "title": episode.get("name", ""),
+            "season": season.get("season_number", 1),
+            "episode": episode.get("episode_number", 1),
+            "tvshowtitle": serie_info.get("title", ""),
+            "genre": serie_info.get("genres", ""),
+            "year": serie_info.get("year", ""),
+            "plot": episode.get("overview", ""),
+            "playcount": 0  # Kodi manages this automatically isf omitted
+        })
+
+        # Optional thumbnail/poster
+        li.setArt({
+            "thumb": defualt_thumb_ep,
+            "poster": defualt_thumb_ep,
+            "icon": "DefaultVideo.png"
+        })
+
+        xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, listitem=li)
+
+        save_played_series(serieId)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 

@@ -75,10 +75,9 @@ class WebshareClient:
             xbmc.log(f"❌ Výnimka pri logine: {e}", xbmc.LOGERROR)
             return False
 
-    def get_stream_url(self, ident, retry=True):
+    def get_stream_url(self, ident, retry=True, mongo_collection=None):
         if not self.token and not self.login():
-            xbmc.log("❌ Prihlásenie zlyhalo, nemôžem získať stream URL", xbmc.LOGERROR)
-            xbmcgui.Dialog().notification("Webshare prihlásenie zlyhalo, skontroluj nastavenia.", xbmcgui.NOTIFICATION_ERROR)
+            xbmcgui.Dialog().notification("Webshare prihlásenie zlyhalo", "", xbmcgui.NOTIFICATION_ERROR)
             return None
 
         try:
@@ -92,19 +91,43 @@ class WebshareClient:
                 link_dict = parse_xml_response(response_text)
 
                 if link_dict.get("status") == "OK":
-                    xbmc.log(f"✅ Stream URL pre ident {ident} úspešne získaný", xbmc.LOGDEBUG)
                     return link_dict.get("link")
                 elif retry:
-                    xbmc.log(f"🔁 Skúsime obnoviť token pre ident {ident}", xbmc.LOGINFO)
                     self.token = None
-                    return self.get_stream_url(ident, retry=False)
+                    return self.get_stream_url(ident, retry=False, mongo_collection=mongo_collection)
                 else:
-                    xbmc.log(f"❌ Neúspešný response aj po re-login: {link_dict}", xbmc.LOGERROR)
+                    if link_dict.get("code") == "FILE_LINK_FATAL_1":
+                        user_choice = xbmcgui.Dialog().yesno(
+                            "Súbor nenájdený",
+                            f"Súbor s ident {ident} neexistuje.\nChceš ho vymazať z databázy?"
+                        )
+                        if user_choice:
+                            if mongo_collection is not None:
+                                try:
+                                    result = mongo_collection.delete_one({"ident": ident})
+                                    if result.deleted_count > 0:
+                                        xbmc.log(f"🗑️ Dokument s ident {ident} vymazaný z kolekcie.", xbmc.LOGINFO)
+                                        return "deleted"
+                                    else:
+                                        xbmc.log(f"⚠️ Dokument s ident {ident} sa nenašiel na vymazanie.", xbmc.LOGWARNING)
+                                        return "not_found"
+                                except Exception as e:
+                                    error_message = str(e)
+                                    if "not authorized" in error_message or "Unauthorized" in error_message:
+                                        xbmc.log("🚫 Používateľ nemá práva na mazanie z MongoDB.", xbmc.LOGERROR)
+                                        return "unauthorized"
+                                    else:
+                                        xbmc.log(f"❌ Výnimka pri mazaní dokumentu: {error_message}", xbmc.LOGERROR)
+                                        return "delete_error"
+                        else:
+                            return "cancel"  # používateľ zrušil mazanie
+                    xbmc.log(f"❌ Neúspešný response aj po retry: {link_dict}", xbmc.LOGERROR)
                     return None
 
         except Exception as e:
-            xbmc.log(f"❌ Chyba pri načítaní stream URL: {e}", xbmc.LOGERROR)
+            xbmc.log(f"❌ Výnimka pri načítaní stream URL: {e}", xbmc.LOGERROR)
             return None
+
 
 #-------- XML parsovanie --------
 def parse_xml_response(text):
