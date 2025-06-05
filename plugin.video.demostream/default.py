@@ -384,13 +384,15 @@ def main_menu():
     # Vytvorenie položiek menu
     menu_items = [
         ('Vyhľadávanie', 'search', 'DefaultAddonsSearch.png'),
-        ('Naposledy pridané filmy', 'show_latest_added_movies', 'DefaultRecentlyAddedMovies.png'),
-        ('Naposledy pridané seriály', 'list_latest_added_series', 'DefaultRecentlyAddedEpisodes.png'),
         ('Najnovšie filmy', 'show_latest_movies', 'DefaultRecentlyAddedMovies.png'),
         ('Najnovšie seriály', 'list_latest_series', 'DefaultRecentlyAddedEpisodes.png'),
+        ('Naposledy pridané filmy', 'show_latest_added_movies', 'DefaultRecentlyAddedMovies.png'),
+        ('Naposledy pridané seriály', 'list_latest_added_series', 'DefaultRecentlyAddedEpisodes.png'),
+        ('Tipy na dnes (ČSFD)', 'typy_na_dnes_csfd', 'DefaultTVShows.png'),
         ('Filmy', 'show_movies', 'DefaultVideo.png'),
         ('Seriály', 'list_series', 'DefaultTVShows.png'),
-        ('Tipy na dnes (ČSFD)', 'typy_na_dnes_csfd', 'DefaultTVShows.png'),
+        ('Filmy podľa názvu (A-Z)', 'list_movies_by_name', 'DefaultVideo.png'),
+        ('Seriály podľa názvu (A-Z)', 'list_series_by_name', 'DefaultTVShows.png'),
         ('Naposledy hľadané', 'recent_searches', 'DefaultFolder.png'),
         ('Naposledy sledované filmy', 'recently_played', 'DefaultPlaylist.png'),
         ('Naposledy sledované seriály', 'recently_played_series', 'DefaultPlaylist.png'),
@@ -1204,6 +1206,148 @@ def typy_na_dnes_csfd():
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
+def get_movies_by_initial(initial, length=1):
+    """Získaj filmy začínajúce na dané písmeno/znaky"""
+    regex_pattern = f'^{re.escape(initial)}' if length == 1 else f'^{re.escape(initial)}'
+    return list(get_collection("movies").find({
+        "title": {"$regex": regex_pattern, "$options": "i"},
+        "status": 1
+    }).sort("title", 1))
+
+def get_series_by_initial(initial, length=1):
+    """Získaj seriály začínajúce na dané písmeno/znaky"""
+    regex_pattern = f'^{re.escape(initial)}' if length == 1 else f'^{re.escape(initial)}'
+    return list(get_collection("series").aggregate([
+        {"$match": {
+            "title": {"$regex": regex_pattern, "$options": "i"}
+        }},
+        {"$lookup": {
+            "from": "episodes",
+            "localField": "serieId",
+            "foreignField": "serieId",
+            "as": "episodes"
+        }},
+        {"$match": {
+            "episodes.statusWS": 1
+        }},
+        {"$sort": {"title": 1}}
+    ]))
+
+def list_movies_by_name(initial=None, length=1):
+    """Zobraziť filmy podľa názvu (písmená, dvojice, trojice, zoznam)"""
+    xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Filmy podľa názvu')
+    xbmcplugin.setContent(ADDON_HANDLE, 'videos')
+    
+    # Pridanie návratu do hlavného menu
+    url = build_url({'action': 'main_menu'})
+    li = xbmcgui.ListItem(label='[B]<< Hlavné menu[/B]')
+    li.setArt({'icon': 'DefaultFolderBack.png'})
+    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+    
+    if initial is None:
+        # Zobraziť písmená A-Z a 0-9
+        letters = [chr(i) for i in range(65, 91)]  # A-Z
+        letters.extend([str(i) for i in range(10)])  # 0-9
+        
+        for letter in letters:
+            movies = get_movies_by_initial(letter)
+            count = len(movies)
+            if count > 0:
+                url = build_url({'action': 'list_movies_by_name', 'initial': letter, 'length': 1})
+                li = xbmcgui.ListItem(label=f'{letter} ({count})')
+                xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+    
+    elif length == 1:
+        # Zobraziť dvojice písmen pre zvolené písmeno
+        movies = get_movies_by_initial(initial)
+        first_two_chars = sorted(list(set(movie['title'][:2].upper() for movie in movies if len(movie['title']) >= 2)))
+        
+        for two_chars in first_two_chars:
+            if two_chars.startswith(initial.upper()):
+                count = len([m for m in movies if m['title'].upper().startswith(two_chars)])
+                if count > 0:
+                    url = build_url({'action': 'list_movies_by_name', 'initial': two_chars, 'length': 2})
+                    li = xbmcgui.ListItem(label=f'{two_chars} ({count})')
+                    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+    
+    elif length == 2:
+        # Zobraziť trojice písmen pre zvolenú dvojicu
+        movies = get_movies_by_initial(initial)
+        first_three_chars = sorted(list(set(movie['title'][:3].upper() for movie in movies if len(movie['title']) >= 3)))
+        
+        for three_chars in first_three_chars:
+            if three_chars.startswith(initial.upper()):
+                count = len([m for m in movies if m['title'].upper().startswith(three_chars)])
+                if count > 0:
+                    url = build_url({'action': 'list_movies_by_name', 'initial': three_chars, 'length': 3})
+                    li = xbmcgui.ListItem(label=f'{three_chars} ({count})')
+                    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+    
+    else:
+        # Zobraziť filmy pre zvolenú trojicu písmen
+        movies = get_movies_by_initial(initial, length=3)
+        for movie in movies:
+            add_movie_listitem(movie, ADDON_HANDLE)
+    
+    xbmcplugin.endOfDirectory(ADDON_HANDLE)
+
+def list_series_by_name(initial=None, length=1):
+    """Zobraziť seriály podľa názvu (písmená, dvojice, trojice, zoznam)"""
+    xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Seriály podľa názvu')
+    xbmcplugin.setContent(ADDON_HANDLE, 'tvshows')
+    
+    # Pridanie návratu do hlavného menu
+    url = build_url({'action': 'main_menu'})
+    li = xbmcgui.ListItem(label='[B]<< Hlavné menu[/B]')
+    li.setArt({'icon': 'DefaultFolderBack.png'})
+    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+    
+    if initial is None:
+        # Zobraziť písmená A-Z a 0-9
+        letters = [chr(i) for i in range(65, 91)]  # A-Z
+        letters.extend([str(i) for i in range(10)])  # 0-9
+        
+        for letter in letters:
+            series = get_series_by_initial(letter)
+            count = len(series)
+            if count > 0:
+                url = build_url({'action': 'list_series_by_name', 'initial': letter, 'length': 1})
+                li = xbmcgui.ListItem(label=f'{letter} ({count})')
+                xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+    
+    elif length == 1:
+        # Zobraziť dvojice písmen pre zvolené písmeno
+        series = get_series_by_initial(initial)
+        first_two_chars = sorted(list(set(s['title'][:2].upper() for s in series if len(s['title']) >= 2)))
+        
+        for two_chars in first_two_chars:
+            if two_chars.startswith(initial.upper()):
+                count = len([s for s in series if s['title'].upper().startswith(two_chars)])
+                if count > 0:
+                    url = build_url({'action': 'list_series_by_name', 'initial': two_chars, 'length': 2})
+                    li = xbmcgui.ListItem(label=f'{two_chars} ({count})')
+                    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+    
+    elif length == 2:
+        # Zobraziť trojice písmen pre zvolenú dvojicu
+        series = get_series_by_initial(initial)
+        first_three_chars = sorted(list(set(s['title'][:3].upper() for s in series if len(s['title']) >= 3)))
+        
+        for three_chars in first_three_chars:
+            if three_chars.startswith(initial.upper()):
+                count = len([s for s in series if s['title'].upper().startswith(three_chars)])
+                if count > 0:
+                    url = build_url({'action': 'list_series_by_name', 'initial': three_chars, 'length': 3})
+                    li = xbmcgui.ListItem(label=f'{three_chars} ({count})')
+                    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+    
+    else:
+        # Zobraziť seriály pre zvolenú trojicu písmen
+        series = get_series_by_initial(initial, length=3)
+        for s in series:
+            add_series_listitem(s, ADDON_HANDLE)
+    
+    xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 params = dict(parse_qsl(sys.argv[2][1:]))
 action = params.get('action')
@@ -1266,6 +1410,10 @@ elif action == 'list_latest_added_series':
     list_latest_added_series(page=page)
 elif action == 'typy_na_dnes_csfd':
     typy_na_dnes_csfd()
+elif action == 'list_movies_by_name':
+    list_movies_by_name(params.get('initial'), int(params.get('length', 1)))
+elif action == 'list_series_by_name':
+    list_series_by_name(params.get('initial'), int(params.get('length', 1)))
 else:
     # Initial login and main menu
     main_menu()
