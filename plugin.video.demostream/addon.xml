@@ -1,4 +1,4 @@
-<addon id="plugin.video.demostream" name="DemoStream" version="1.0.1" provider-name="Speed99">
+<addon id="plugin.video.demostream" name="DemoStream" version="1.0.2" provider-name="Speed99">
     <requires>
         <import addon="xbmc.python" version="3.0.0" />
     </requires>

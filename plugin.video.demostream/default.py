@@ -27,11 +27,14 @@ from urllib import request, parse
 from tmdb.searchTMDBMulti import search_movie_tmdb
 from resources.lib.webshare_client import WebshareClient
 from resources.lib.csfd_client import fetch_csfd_tip_titles
+from redis_cache import redis_cache
 
 try:
     from xbmc import translatePath
 except ImportError:
     from xbmcvfs import translatePath
+    
+    
 
     # MongoDB Connection Manager
 class MongoDBConnection:
@@ -114,7 +117,7 @@ genre_dict = {
 # Log adresárov a vytvorenie priečinka
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
-PER_PAGE = 20  # počet poloziek na jednu stranu
+PER_PAGE = addon.getSettingInt("per_page") or 20
 
 def format_time(seconds):
     mins, secs = divmod(int(seconds), 60)
@@ -510,7 +513,24 @@ def show_movies(query=None, page=1):
             mongo_query = {"status": 1}
 
         skip_count = (page - 1) * PER_PAGE
-        movies = get_collection("movies").find(mongo_query).sort("movieId", -1).skip(skip_count).limit(PER_PAGE)
+        
+        # bezpečný cache key
+        query_str = json.dumps(mongo_query, sort_keys=True)
+        query_hash = hashlib.md5(query_str.encode("utf-8")).hexdigest()
+        cache_key = f"movies_{query_hash}_{skip_count}_{PER_PAGE}"
+
+        movies = redis_cache.get_or_cache(
+            cache_key,
+            lambda: list(
+                get_collection("movies")
+                .find(mongo_query)
+                .sort("movieId", -1)
+                .skip(skip_count)
+                .limit(PER_PAGE)
+            ),
+            ttl=600
+        )
+        #movies = get_collection("movies").find(mongo_query).sort("movieId", -1).skip(skip_count).limit(PER_PAGE)
 
         # Pridaj navigáciu na začiatok
         add_pagination_controls(page, 0, PER_PAGE, query, action='show_movies')
@@ -537,7 +557,7 @@ def show_latest_movies(page=1):
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
     skip_count = (page - 1) * PER_PAGE
-
+    
     movies = get_collection("movies").find({"status": 1}).sort("release_date", -1).skip(skip_count).limit(PER_PAGE)
 
     movies_list = list(movies)
@@ -799,12 +819,19 @@ def list_seasons(serieId):
 
     try:
         serieId = int(serieId)
-        all_seasons = list(get_collection("seasons").find({"serieId": serieId}).sort("season_number", 1))
+        
+        cache_key = f"seasons_{serieId}"
+        all_seasons = redis_cache.get_or_cache(
+            cache_key,
+            lambda: list(get_collection("seasons").find({"serieId": serieId})),
+            ttl=600
+        )
 
         available_counts = list(get_collection("episodes").aggregate([
             {"$match": {"serieId": serieId, "statusWS": 1}},
             {"$group": {"_id": "$seasonId", "count": {"$sum": 1}}}
         ]))
+        
         available_dict = {s["_id"]: s["count"] for s in available_counts}
 
         for season in all_seasons:
@@ -856,11 +883,15 @@ def list_episodes(serieId, seasonId):
         season_data = get_collection("seasons").find_one({"serieId": serieId, "seasonId": seasonId})
         season_num = season_data.get("season_number", 1) if season_data else 1
 
-        episodes = get_collection("episodes").find({
-            "serieId": serieId,
-            "seasonId": seasonId,
-            "statusWS": 1
-        }).sort("episode_number", 1)
+        episodes = redis_cache.get_or_cache(
+            f"episodes_{serieId}_{seasonId}",
+            lambda: list(get_collection("episodes").find({
+                "serieId": serieId,
+                "seasonId": seasonId,
+                "statusWS": 1
+            }).sort("episode_number", 1)),
+            ttl=600
+        )
 
         for episode in episodes:
             ep_num = episode.get("episode_number", 0)
@@ -927,6 +958,7 @@ def select_stream(movie_id):
         return
 
     details = list(get_collection("movie_detail").find({"fkMovieId": movie_id}))
+
     if not details:
         xbmcgui.Dialog().notification("Žiadne súbory", "Pre tento film nie sú dostupné žiadne súbory.", xbmcgui.NOTIFICATION_INFO, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
@@ -1031,7 +1063,6 @@ def select_stream(movie_id):
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 def select_stream_serie(episodeId):
-    global webshare_token
 
     try:
         episodeId = int(episodeId)
@@ -1043,6 +1074,7 @@ def select_stream_serie(episodeId):
 
     # Get all available files for this episode
     details = list(get_collection("episode_detail_links").find({"episodeId": episodeId}))
+    
     # Check if details are empty
     if not details:
         xbmcgui.Dialog().notification("Žiadne súbory", "Pre túto epizódu nie sú dostupné súbory.", xbmcgui.NOTIFICATION_INFO, 3000)
@@ -1178,60 +1210,71 @@ def typy_na_dnes_csfd():
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Tipy na dnes (ČSFD)')
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
-    results = fetch_csfd_tip_titles()
+    def fetch_csfd_tips():
+        results = fetch_csfd_tip_titles()
+        if not results or (isinstance(results, dict) and results.get("error")):
+            return []
 
-    if isinstance(results, dict) and results.get("error"):
-        xbmcgui.Dialog().ok("Chyba", results["error"])
-        return
+        movies = []
+        for item in results:
+            movie = get_collection("movies").find_one({
+                "title": {"$regex": f"^{re.escape(item['title'])}$", "$options": "i"},
+                "year": item["year"]
+            })
+            if movie:
+                movies.append(movie)
+        return movies
 
-    if not results:
-        xbmcgui.Dialog().ok("Žiadne tipy", "Neboli nájdené žiadne tipy z CSFD na dnes.")
-        return
+    movies = redis_cache.get_or_cache(
+        "csfd_tips_full",
+        fetch_csfd_tips,
+        ttl=21600  # 6 hodín
+    )
 
-    for item in results:
-        title = item["title"]
-        year = item["year"]
-        xbmc.log(f"Hľadám film: {title} ({year})", xbmc.LOGINFO)
-
-        query = {
-            "title": {"$regex": f"^{re.escape(title)}$", "$options": "i"},
-            "year": year
-        }
-
-        movie = get_collection("movies").find_one(query)
-        if not movie:
-            continue
-
-        add_movie_listitem(movie, ADDON_HANDLE)
+    if not movies:
+        xbmcgui.Dialog().notification("Chyba", "Nenašli sa žiadne filmy", xbmcgui.NOTIFICATION_WARNING)
+    else:
+        for movie in movies:
+            add_movie_listitem(movie, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 def get_movies_by_initial(initial, length=1):
     """Získaj filmy začínajúce na dané písmeno/znaky"""
-    regex_pattern = f'^{re.escape(initial)}' if length == 1 else f'^{re.escape(initial)}'
-    return list(get_collection("movies").find({
-        "title": {"$regex": regex_pattern, "$options": "i"},
-        "status": 1
-    }).sort("title", 1))
+    cache_key = f"movies_initial_{initial}_{length}"
+    
+    return redis_cache.get_or_cache(
+        cache_key,
+        lambda: list(get_collection("movies").find({
+            "title": {"$regex": f'^{re.escape(initial)}', "$options": "i"},
+            "status": 1
+        }).sort("title", 1)),
+        ttl=600 # 10 minut
+    )
 
 def get_series_by_initial(initial, length=1):
     """Získaj seriály začínajúce na dané písmeno/znaky"""
-    regex_pattern = f'^{re.escape(initial)}' if length == 1 else f'^{re.escape(initial)}'
-    return list(get_collection("series").aggregate([
-        {"$match": {
-            "title": {"$regex": regex_pattern, "$options": "i"}
-        }},
-        {"$lookup": {
-            "from": "episodes",
-            "localField": "serieId",
-            "foreignField": "serieId",
-            "as": "episodes"
-        }},
-        {"$match": {
-            "episodes.statusWS": 1
-        }},
-        {"$sort": {"title": 1}}
-    ]))
+    cache_key = f"series_initial_{initial}_{length}"
+    
+    return redis_cache.get_or_cache(
+        cache_key,
+        lambda: list(get_collection("series").aggregate([
+            {"$match": {
+                "title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}
+            }},
+            {"$lookup": {
+                "from": "episodes",
+                "localField": "serieId",
+                "foreignField": "serieId",
+                "as": "episodes"
+            }},
+            {"$match": {
+                "episodes.statusWS": 1
+            }},
+            {"$sort": {"title": 1}}
+        ])),
+        ttl=600  # 10 minut
+    )
 
 def list_movies_by_name(initial=None, length=1):
     """Zobraziť filmy podľa názvu (písmená, dvojice, trojice, zoznam)"""

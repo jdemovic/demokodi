@@ -1,8 +1,12 @@
+Version 1.0.2
+- Pridanie REDIS cache -> kam sa to hodilo, priapdne sa to bude upravovat tam, kde to bude potrebne
+- Pridana moznost menit velkost strankovania v nastaveniach
+
 Version 1.0.1
 - Uprava zoradenia prehladov a pridanie zoznamov podla abecedy
 
 Version 1.0.0
-- Upravene vyhladavanie, ktore bolo robene cez CZ jazyk na kolkciu cz/sk/en
+- Upravene vyhladavanie, ktore bolo robene cez CZ jazyk na kolekciu cz/sk/en
 
 Version 0.9.9
 - Pridana moznost vymazat neexistujuce streamy/identy z DB (boli ostranene z WS) - len ak ma uzivatel opravnenie

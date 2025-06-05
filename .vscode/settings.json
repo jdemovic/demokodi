@@ -1,0 +1,6 @@
+{
+  "python.analysis.extraPaths": [
+    "plugin.video.demostream/resources/lib/python",
+    "plugin.video.demostream/resources/lib"
+  ]
+}

@@ -13,6 +13,9 @@
     <category label="TMDB API">
         <setting id="tmdb_api_key" type="text" label="TMDB API kľúč" default="0195edd0dfc6c90117e6fc7fe70a320c" option="hidden"/>
         <setting id="tmdb_language" type="text" label="Jazyk TMDB" default="cz-CZ" />
-        <setting id="tmdb_region" type="text" label="Región TMDB" default="SK" />s
+        <setting id="tmdb_region" type="text" label="Región TMDB" default="SK" />
+    </category>
+    <category label="Ostatné">
+        <setting id="per_page" type="number" label="Počet položiek na stránke" default="20"/>
     </category>
 </settings>
