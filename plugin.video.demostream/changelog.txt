@@ -1,6 +1,6 @@
 Version 1.0.2
 - Pridanie REDIS cache -> kam sa to hodilo, priapdne sa to bude upravovat tam, kde to bude potrebne
-- Pridana moznost menit velkost strankovania v nastaveniach
+- Pridana moznost menit velkost strankovania
 
 Version 1.0.1
 - Uprava zoradenia prehladov a pridanie zoznamov podla abecedy
