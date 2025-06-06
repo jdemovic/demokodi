@@ -388,6 +388,7 @@ def main_menu():
     menu_items = [
         ('Vyhľadávanie', 'search', 'DefaultAddonsSearch.png'),
         ('Najnovšie filmy', 'show_latest_movies', 'DefaultRecentlyAddedMovies.png'),
+        ('Novinky dabované', 'show_latest_dubbed_movies', 'DefaultRecentlyAddedMovies.png'),
         ('Najnovšie seriály', 'list_latest_series', 'DefaultRecentlyAddedEpisodes.png'),
         ('Naposledy pridané filmy', 'show_latest_added_movies', 'DefaultRecentlyAddedMovies.png'),
         ('Naposledy pridané seriály', 'list_latest_added_series', 'DefaultRecentlyAddedEpisodes.png'),
@@ -1392,6 +1393,60 @@ def list_series_by_name(initial=None, length=1):
     
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
+def show_latest_dubbed_movies():
+    xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Novinky dabované')
+    xbmcplugin.setContent(ADDON_HANDLE, 'movies')
+
+    def fetch_dubbed_movies():
+        dubbed_langs = {"CZE", "CSE", "SLK"}
+        movies = list(
+            get_collection("movies")
+            .find({"status": 1, "release_date": {"$exists": True}})
+            .sort("release_date", -1)
+            .limit(300)
+        )
+
+        filtered = []
+
+        for movie in movies:
+            movie_id = movie.get("movieId")
+            if not movie_id:
+                continue
+
+            try:
+                audios = get_collection("movie_detail").find({"fkMovieId": movie_id}).distinct("audio")
+                for entry in audios:
+                    if isinstance(entry, list):
+                        for lang in entry:
+                            code = re.split(r'[\(\)]', lang)[0].strip().upper()
+                            if code in dubbed_langs:
+                                filtered.append(movie)
+                                break
+                    elif isinstance(entry, str):
+                        code = re.split(r'[\(\)]', entry)[0].strip().upper()
+                        if code in dubbed_langs:
+                            filtered.append(movie)
+
+                    if movie in filtered:
+                        break
+
+                if len(filtered) >= 100:
+                    break
+
+            except Exception as e:
+                xbmc.log(f"Chyba pri filtrovaní dabovaných filmov: {str(e)}", xbmc.LOGWARNING)
+
+        return filtered[:100]
+
+    # --- CACHE na 10 minút (600 sekúnd)
+    movies = redis_cache.get_or_cache("latest_dubbed_movies", fetch_dubbed_movies, ttl=600)
+
+    for movie in movies:
+        add_movie_listitem(movie, ADDON_HANDLE)
+
+    xbmcplugin.endOfDirectory(ADDON_HANDLE)
+
+
 params = dict(parse_qsl(sys.argv[2][1:]))
 action = params.get('action')
 
@@ -1457,6 +1512,8 @@ elif action == 'list_movies_by_name':
     list_movies_by_name(params.get('initial'), int(params.get('length', 1)))
 elif action == 'list_series_by_name':
     list_series_by_name(params.get('initial'), int(params.get('length', 1)))
+elif action == 'show_latest_dubbed_movies':
+    show_latest_dubbed_movies()
 else:
     # Initial login and main menu
     main_menu()
