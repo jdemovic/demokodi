@@ -395,6 +395,7 @@ def main_menu():
         ('Tipy na dnes (ČSFD)', 'typy_na_dnes_csfd', 'DefaultTVShows.png'),
         ('Trending filmy (posledných 14 dní) TMDB', 'list_trending_movies_last_14_days', 'DefaultMovies.png'),
         ('Top 100 populárnych filmov (CZ/SK) TMDB', 'list_top_popular_movies_czsk', 'DefaultMovies.png'),
+        ('Top 100 najlepšie hodnotených filmov (CZ/SK)', 'list_top_rated_movies_czsk', 'DefaultMovies.png'),
         ('Filmy', 'show_movies', 'DefaultVideo.png'),
         ('Seriály', 'list_series', 'DefaultTVShows.png'),
         ('Filmy podľa názvu (A-Z)', 'list_movies_by_name', 'DefaultVideo.png'),
@@ -1521,6 +1522,42 @@ def list_trending_movies_last_14_days():
         add_movie_listitem(movie, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
+    
+def list_top_rated_movies_czsk():
+    xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Top 100 najlepšie hodnotených filmov (CZ/SK)')
+    xbmcplugin.setContent(ADDON_HANDLE, 'movies')
+
+    def fetch_top_rated_ids():
+
+        top_rated_ids = []
+        api_key = addon.getSetting("tmdb_api_key")
+
+        for page in range(1, 6):  # 5 strán po 20 = 100 filmov
+            url = f"https://api.themoviedb.org/3/movie/top_rated?api_key={api_key}&language=cs-CZ&region=CZ&page={page}"
+            try:
+                with request.urlopen(url, timeout=10) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                    for item in data.get("results", []):
+                        top_rated_ids.append(item["id"])
+            except Exception as e:
+                xbmc.log(f"Chyba pri načítaní top rated filmov z TMDb: {e}", xbmc.LOGWARNING)
+
+        return top_rated_ids
+
+    tmdb_ids = redis_cache.get_or_cache("tmdb_top_rated_czsk_ids", fetch_top_rated_ids, ttl=21600)
+
+    found_movies = []
+    for tmdb_id in tmdb_ids:
+        movie = get_collection("movies").find_one({"tmdbId": tmdb_id, "status": 1})
+        if movie:
+            found_movies.append(movie)
+        if len(found_movies) >= 100:
+            break
+
+    for movie in found_movies:
+        add_movie_listitem(movie, ADDON_HANDLE)
+
+    xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 params = dict(parse_qsl(sys.argv[2][1:]))
 action = params.get('action')
@@ -1593,6 +1630,8 @@ elif action == 'list_top_popular_movies_czsk':
     list_top_popular_movies_czsk()
 elif action == 'list_trending_movies_last_14_days':
     list_trending_movies_last_14_days()
+elif action == 'list_top_rated_movies_czsk':
+    list_top_rated_movies_czsk()
 else:
     # Initial login and main menu
     main_menu()
