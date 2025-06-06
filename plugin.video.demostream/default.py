@@ -393,6 +393,8 @@ def main_menu():
         ('Naposledy pridané filmy', 'show_latest_added_movies', 'DefaultRecentlyAddedMovies.png'),
         ('Naposledy pridané seriály', 'list_latest_added_series', 'DefaultRecentlyAddedEpisodes.png'),
         ('Tipy na dnes (ČSFD)', 'typy_na_dnes_csfd', 'DefaultTVShows.png'),
+        ('Trending filmy (posledných 14 dní) TMDB', 'list_trending_movies_last_14_days', 'DefaultMovies.png'),
+        ('Top 100 populárnych filmov (CZ/SK) TMDB', 'list_top_popular_movies_czsk', 'DefaultMovies.png'),
         ('Filmy', 'show_movies', 'DefaultVideo.png'),
         ('Seriály', 'list_series', 'DefaultTVShows.png'),
         ('Filmy podľa názvu (A-Z)', 'list_movies_by_name', 'DefaultVideo.png'),
@@ -1446,6 +1448,79 @@ def show_latest_dubbed_movies():
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
+def list_top_popular_movies_czsk():
+    xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Top 100 populárnych filmov (CZ/SK)')
+    xbmcplugin.setContent(ADDON_HANDLE, 'movies')
+
+    def fetch_tmdb_popular_ids():
+
+        popular_ids = []
+        api_key = addon.getSetting("tmdb_api_key")
+
+        for page in range(1, 6):
+            url = f"https://api.themoviedb.org/3/movie/popular?api_key={api_key}&language=cs-CZ&region=CZ&page={page}"
+            try:
+                with urllib.request.urlopen(url, timeout=10) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                    for item in data.get("results", []):
+                        popular_ids.append(item["id"])
+            except Exception as e:
+                xbmc.log(f"Chyba pri načítaní populárnych filmov z TMDb: {e}", xbmc.LOGWARNING)
+
+        return popular_ids
+
+    tmdb_ids = redis_cache.get_or_cache("tmdb_popular_czsk_ids", fetch_tmdb_popular_ids, ttl=21600)
+
+    found_movies = []
+    for tmdb_id in tmdb_ids:
+        movie = get_collection("movies").find_one({"tmdbId": tmdb_id, "status": 1})
+        if movie:
+            found_movies.append(movie)
+        if len(found_movies) >= 100:
+            break
+
+    for movie in found_movies:
+        add_movie_listitem(movie, ADDON_HANDLE)
+
+    xbmcplugin.endOfDirectory(ADDON_HANDLE)
+
+
+def list_trending_movies_last_14_days():
+    xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Trending filmy (posledných 14 dní)')
+    xbmcplugin.setContent(ADDON_HANDLE, 'movies')
+
+    def fetch_trending_ids():
+
+        trending_ids = set()
+        api_key = addon.getSetting("tmdb_api_key")
+
+        for period in ['day', 'week']:
+            for i in range(1, 3):
+                url = f"https://api.themoviedb.org/3/trending/movie/{period}?api_key={api_key}&page={i}"
+                try:
+                    with urllib.request.urlopen(url, timeout=10) as response:
+                        data = json.loads(response.read().decode('utf-8'))
+                        for item in data.get("results", []):
+                            trending_ids.add(item["id"])
+                except Exception as e:
+                    xbmc.log(f"Chyba pri načítaní trending filmov ({period}): {e}", xbmc.LOGWARNING)
+
+        return list(trending_ids)
+
+    tmdb_ids = redis_cache.get_or_cache("tmdb_trending_14days", fetch_trending_ids, ttl=21600)
+
+    found_movies = []
+    for tmdb_id in tmdb_ids:
+        movie = get_collection("movies").find_one({"tmdbId": tmdb_id, "status": 1})
+        if movie:
+            found_movies.append(movie)
+        if len(found_movies) >= 100:
+            break
+
+    for movie in found_movies:
+        add_movie_listitem(movie, ADDON_HANDLE)
+
+    xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 params = dict(parse_qsl(sys.argv[2][1:]))
 action = params.get('action')
@@ -1514,6 +1589,10 @@ elif action == 'list_series_by_name':
     list_series_by_name(params.get('initial'), int(params.get('length', 1)))
 elif action == 'show_latest_dubbed_movies':
     show_latest_dubbed_movies()
+elif action == 'list_top_popular_movies_czsk':
+    list_top_popular_movies_czsk()
+elif action == 'list_trending_movies_last_14_days':
+    list_trending_movies_last_14_days()
 else:
     # Initial login and main menu
     main_menu()
