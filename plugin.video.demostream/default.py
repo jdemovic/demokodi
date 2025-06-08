@@ -12,8 +12,6 @@ import re
 import hashlib
 from datetime import datetime, timedelta
 from md5crypt import md5crypt
-
-# Kodi používa len základné knižnice, xml parsovanie urobíme bez xmltodict
 import xml.etree.ElementTree as ET
 
 addon_dir = os.path.dirname(__file__)
@@ -33,10 +31,34 @@ try:
     from xbmc import translatePath
 except ImportError:
     from xbmcvfs import translatePath
-    
-    
 
-    # MongoDB Connection Manager
+# Načítanie nastavení doplnku
+addon = xbmcaddon.Addon()
+mongodb_user = addon.getSetting("mongodb_user")
+mongodb_pass = addon.getSetting("mongodb_pass")
+mongodb_host = addon.getSetting("mongodb_host")
+mongodb_db   = addon.getSetting("mongodb_db")
+webshare_user = addon.getSetting("webshare_user")
+webshare_pass = addon.getSetting("webshare_pass")
+
+# Skontroluj chýbajúce
+missing_settings = []
+if not mongodb_user: missing_settings.append("MongoDB - používateľ")
+if not mongodb_pass: missing_settings.append("MongoDB - heslo")
+if not webshare_user: missing_settings.append("Webshare - používateľ")
+if not webshare_pass: missing_settings.append("Webshare - heslo")
+
+if missing_settings:
+    xbmcgui.Dialog().ok(
+        "Chýbajúce nastavenia",
+        "Niektoré údaje nie sú vyplnené:\n" + "\n".join(missing_settings) +
+        "\n\nOtvoríme nastavenia doplnku."
+    )
+    addon.openSettings()
+    xbmcplugin.endOfDirectory(int(sys.argv[1]), succeeded=True)
+    sys.exit()
+
+# MongoDB Connection Manager
 class MongoDBConnection:
     _instance = None
 
@@ -47,51 +69,55 @@ class MongoDBConnection:
         return cls._instance
 
     def _initialize(self):
-        #uri = f"mongodb+srv://{mongodb_user}:{mongodb_pass}@{mongodb_host}/sc3?authSource=sc3"
-        uri = f"mongodb://{mongodb_user}:{mongodb_pass}@{mongodb_host}/{mongodb_db}?authSource={mongodb_db}"
-        self.client = MongoClient(uri, maxPoolSize=50, connectTimeoutMS=5000, socketTimeoutMS=30000)
-        self.db = self.client[mongodb_db]
+        try:
+            uri = f"mongodb://{mongodb_user}:{mongodb_pass}@{mongodb_host}/{mongodb_db}?authSource={mongodb_db}"
+            self.client = MongoClient(uri, maxPoolSize=50, connectTimeoutMS=5000, socketTimeoutMS=30000)
+            self.db = self.client[mongodb_db]
+        except Exception as e:
+            xbmc.log(f"[SC3] MongoDB init error: {e}", xbmc.LOGERROR)
+            raise e
 
     def get_db(self):
         try:
             self.client.admin.command('ping')
             return self.db
-        except ConnectionFailure:
-            self._initialize()
-            return self.db
+        except ConnectionFailure as e:
+            xbmc.log(f"[SC3] MongoDB ping failed: {e}", xbmc.LOGERROR)
+            raise e
 
     def close(self):
         if self.client:
             self.client.close()
         self._instance = None
 
-# With this function:
-def get_collection(collection_name):
-    """Get a MongoDB collection using the connection manager"""
-    return db_connection.get_db()[collection_name]
+# Bezpečné pripojenie k databáze
+try:
+    db_connection = MongoDBConnection()
+    db = db_connection.get_db()
+except Exception as e:
+    xbmcgui.Dialog().ok("Chyba MongoDB", "Nepodarilo sa pripojiť do databázy.\nSkontrolujte údaje v nastaveniach doplnku.")
+    xbmc.log(f"[SC3] MongoDB Connection Error: {e}", xbmc.LOGERROR)
+    sys.exit()
 
+# Pomocná funkcia na získanie kolekcie
+def get_collection(collection_name):
+    return db[collection_name]
+
+# Základné premenné
 ADDON_HANDLE = int(sys.argv[1])
 BASE_URL = sys.argv[0]
 ARGS = urllib.parse.parse_qs(sys.argv[2][1:])
 
-# Priečinky pre súbory
-addon = xbmcaddon.Addon()
 profile_dir = translatePath(addon.getAddonInfo('profile'))
 STORAGE_DIR = os.path.join(profile_dir, 'store')
 SEARCH_HISTORY_FILE = os.path.join(STORAGE_DIR, 'search_terms.json')
 MOVIE_HISTORY_FILE = os.path.join(STORAGE_DIR, 'movie_history.json')
 SERIE_HISTORY_FILE = os.path.join(STORAGE_DIR, 'serie_history.json')
 
-# mongodb settings
-mongodb_user = addon.getSetting("mongodb_user")
-mongodb_pass = addon.getSetting("mongodb_pass")
-mongodb_host = addon.getSetting("mongodb_host")
-mongodb_db = addon.getSetting("mongodb_db")
-
-# webshare settings
+# Webshare client
 ws = WebshareClient()
 
-# Definuj vlastné poradie pre rozlíšenie
+# Priorita rozlíšení
 resolution_order = {
     "4K": 5,
     "FHD": 4,
@@ -100,21 +126,13 @@ resolution_order = {
     "480p": 1
 }
 
-# Initialize MongoDB connection
-db_connection = MongoDBConnection()
-db = db_connection.get_db()
-
-# Initialize collections
-def get_collection(collection_name):
-    return db[collection_name]
-
-# Načítaj žánrový číselník pri štarte
+# Načítanie žánrov z databázy
 genre_dict = {
     str(g["id"]): g["name"]
     for g in get_collection("movie_genres").find()
 }
 
-# Log adresárov a vytvorenie priečinka
+# Vytvorenie úložného priečinka
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
 PER_PAGE = addon.getSettingInt("per_page") or 20

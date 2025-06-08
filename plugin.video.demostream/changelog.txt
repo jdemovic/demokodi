@@ -1,3 +1,6 @@
+Version 1.0.5
+- Zistovanie vyplnenia parametrov, potrenych na spravny beh pluginu - zobrazenie hlasky ak nieco chyba
+
 Version 1.0.4
 - Pridané rebricky z TMDB
 
