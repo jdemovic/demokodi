@@ -83,6 +83,13 @@ class WebshareClient:
         try:
             url = self.url + "file_link/"
             payload = {"ident": ident, "wst": self.token}
+
+            # ➕ Získaj heslo z MongoDB, ak kolekcia bola poskytnutá
+            if mongo_collection is not None:
+                doc = mongo_collection.find_one({"ident": ident})
+                if doc and "pass" in doc and doc["pass"]:
+                    payload["password"] = doc["password"]
+
             data = urllib.parse.urlencode(payload).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers=HEADERS)
 
@@ -96,7 +103,21 @@ class WebshareClient:
                     self.token = None
                     return self.get_stream_url(ident, retry=False, mongo_collection=mongo_collection)
                 else:
-                    if link_dict.get("code") == "FILE_LINK_FATAL_1":
+                    code = link_dict.get("code")
+
+                    if code == "FILE_LINK_FATAL_3":
+                        xbmcgui.Dialog().notification("Súbor je zaheslovaný", "Nie je možné ho prehrať.", xbmcgui.NOTIFICATION_ERROR)
+                        return "password_protected"
+
+                    elif code == "FILE_LINK_FATAL_4":
+                        xbmcgui.Dialog().notification("Dočasne nedostupné", "Súbor je momentálne nedostupný.", xbmcgui.NOTIFICATION_WARNING)
+                        return "temporarily_unavailable"
+
+                    elif code == "FILE_LINK_FATAL_6":
+                        xbmcgui.Dialog().notification("Súkromný súbor", "Obsah nie je verejný. Môže ísť o autorsky chránené video.", xbmcgui.NOTIFICATION_ERROR)
+                        return "non_public_file"
+
+                    elif code == "FILE_LINK_FATAL_1":
                         user_choice = xbmcgui.Dialog().yesno(
                             "Súbor nenájdený",
                             f"Súbor s ident {ident} neexistuje.\nChceš ho vymazať z databázy?"
@@ -120,7 +141,8 @@ class WebshareClient:
                                         xbmc.log(f"❌ Výnimka pri mazaní dokumentu: {error_message}", xbmc.LOGERROR)
                                         return "delete_error"
                         else:
-                            return "cancel"  # používateľ zrušil mazanie
+                            return "cancel"
+
                     xbmc.log(f"❌ Neúspešný response aj po retry: {link_dict}", xbmc.LOGERROR)
                     return None
 

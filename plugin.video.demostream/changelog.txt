@@ -1,3 +1,6 @@
+Version 1.0.6
+- pridana kompatibilita so starsimi verziuami KODI (18.x)
+
 Version 1.0.5
 - Zistovanie vyplnenia parametrov, potrenych na spravny beh pluginu - zobrazenie hlasky ak nieco chyba
 

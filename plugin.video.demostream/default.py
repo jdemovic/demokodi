@@ -58,6 +58,30 @@ if missing_settings:
     xbmcplugin.endOfDirectory(int(sys.argv[1]), succeeded=True)
     sys.exit()
 
+# Základné premenné
+ADDON_HANDLE = int(sys.argv[1])
+BASE_URL = sys.argv[0]
+ARGS = urllib.parse.parse_qs(sys.argv[2][1:])
+
+profile_dir = translatePath(addon.getAddonInfo('profile'))
+STORAGE_DIR = os.path.join(profile_dir, 'store')
+SEARCH_HISTORY_FILE = os.path.join(STORAGE_DIR, 'search_terms.json')
+MOVIE_HISTORY_FILE = os.path.join(STORAGE_DIR, 'movie_history.json')
+SERIE_HISTORY_FILE = os.path.join(STORAGE_DIR, 'serie_history.json')
+PER_PAGE = addon.getSettingInt("per_page") or 20
+
+# Webshare client
+ws = WebshareClient()
+
+# Priorita rozlíšení
+resolution_order = {
+    "4K": 5,
+    "FHD": 4,
+    "HD": 3,
+    "SD": 2,
+    "480p": 1
+}
+
 # MongoDB Connection Manager
 class MongoDBConnection:
     _instance = None
@@ -103,29 +127,6 @@ except Exception as e:
 def get_collection(collection_name):
     return db[collection_name]
 
-# Základné premenné
-ADDON_HANDLE = int(sys.argv[1])
-BASE_URL = sys.argv[0]
-ARGS = urllib.parse.parse_qs(sys.argv[2][1:])
-
-profile_dir = translatePath(addon.getAddonInfo('profile'))
-STORAGE_DIR = os.path.join(profile_dir, 'store')
-SEARCH_HISTORY_FILE = os.path.join(STORAGE_DIR, 'search_terms.json')
-MOVIE_HISTORY_FILE = os.path.join(STORAGE_DIR, 'movie_history.json')
-SERIE_HISTORY_FILE = os.path.join(STORAGE_DIR, 'serie_history.json')
-
-# Webshare client
-ws = WebshareClient()
-
-# Priorita rozlíšení
-resolution_order = {
-    "4K": 5,
-    "FHD": 4,
-    "HD": 3,
-    "SD": 2,
-    "480p": 1
-}
-
 # Načítanie žánrov z databázy
 genre_dict = {
     str(g["id"]): g["name"]
@@ -135,11 +136,54 @@ genre_dict = {
 # Vytvorenie úložného priečinka
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
-PER_PAGE = addon.getSettingInt("per_page") or 20
-
 def format_time(seconds):
     mins, secs = divmod(int(seconds), 60)
     return f"{mins}:{secs:02d}"
+
+def create_list_item_legacy(title, plot, year, thumb_url, extra_info={}):
+    li = xbmcgui.ListItem(label=title)
+    info = {
+        "title": title,
+        "plot": plot,
+        "year": int(year) if str(year).isdigit() else None,
+        "mediatype": "episode"
+    }
+    info.update(extra_info)
+    li.setInfo("video", info)
+    li.setArt({'thumb': thumb_url, 'poster': thumb_url, 'fanart': thumb_url})
+    li.setProperty("IsPlayable", "true")
+    return li
+
+def create_list_item_modern(title, plot, year, thumb_url, extra_info={}):
+    li = xbmcgui.ListItem(label=title)
+    try:
+        tag = li.getVideoInfoTag()
+        tag.setTitle(title)
+        tag.setPlot(plot)
+        if str(year).isdigit():
+            tag.setYear(int(year))
+        tag.setMediaType("episode")
+    except Exception as e:
+        xbmc.log(f"[SC3] Fallback InfoTag: {e}", xbmc.LOGDEBUG)
+        li.setInfo("video", {
+            "title": title,
+            "plot": plot,
+            "year": int(year) if str(year).isdigit() else None,
+            "mediatype": "episode"
+        })
+    li.setArt({'thumb': thumb_url, 'poster': thumb_url, 'fanart': thumb_url})
+    li.setProperty("IsPlayable", "true")
+    return li
+
+def create_compatible_list_item(title, plot, year, thumb_url, extra_info={}):
+    try:
+        kodi_major = int(xbmc.getInfoLabel("System.BuildVersion").split(".")[0])
+    except:
+        kodi_major = 18
+    if kodi_major >= 20:
+        return create_list_item_modern(title, plot, year, thumb_url, extra_info)
+    else:
+        return create_list_item_legacy(title, plot, year, thumb_url, extra_info)
 
 #-------- Pridanie položky do zoznamu pre movies --------
 def add_movie_listitem(movie, addon_handle):
@@ -752,9 +796,12 @@ def list_recent_searches():
         return
 
     for term in search_terms:
-        url = build_url({'action': 'search', 'query': term})
-        li = xbmcgui.ListItem(label=f"{term}")
-        xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+        if term and isinstance(term, str) and term.strip():  # kontrola na neprázdny reťazec
+            url = build_url({'action': 'search', 'query': term})
+            li = xbmcgui.ListItem(label=term.strip())
+            xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+        else:
+            xbmc.log(f"[SC3] Preskočený neplatný výraz vo vyhľadávacej histórii: {term}", xbmc.LOGWARNING)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
@@ -791,8 +838,8 @@ def list_played_series():
 
     for serie_id in history:
         series = get_collection("series").find_one({"serieId": serie_id})
-
-        add_series_listitem(series, ADDON_HANDLE)
+        if series:  # ← pridaná kontrola
+            add_series_listitem(series, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
@@ -1026,58 +1073,34 @@ def select_stream(movie_id):
     if index >= 0:
         selected_ident = details[index].get("ident")
         play_url = ws.get_stream_url(ident=selected_ident, mongo_collection=get_collection("movie_detail"))
-        
-        if play_url == "deleted":
-            xbmcgui.Dialog().notification("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO)
-            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
-            return
 
-        elif play_url == "unauthorized":
-            xbmcgui.Dialog().notification("Prístup odmietnutý", "Nemáš práva na mazanie z databázy.", xbmcgui.NOTIFICATION_ERROR)
-            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
-            return
+        error_messages = {
+            "deleted": ("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO),
+            "unauthorized": ("Prístup odmietnutý", "Nemáš práva na mazanie z databázy.", xbmcgui.NOTIFICATION_ERROR),
+            "delete_error": ("Chyba", "Mazanie z databázy zlyhalo.", xbmcgui.NOTIFICATION_ERROR),
+            "not_found": ("Nenájdené", "Záznam s ident sa nenašiel.", xbmcgui.NOTIFICATION_INFO),
+            "password_protected": ("Súbor je zaheslovaný", "Nie je možné ho prehrať.", xbmcgui.NOTIFICATION_ERROR),
+            "temporarily_unavailable": ("Dočasne nedostupné", "Súbor je momentálne nedostupný.", xbmcgui.NOTIFICATION_WARNING),
+            "non_public_file": ("Súkromný súbor", "Obsah nie je verejný. Môže ísť o autorsky chránené video.", xbmcgui.NOTIFICATION_ERROR),
+            None: ("Stream URL", "Nepodarilo sa získať stream URL.", xbmcgui.NOTIFICATION_ERROR)
+        }
 
-        elif play_url == "delete_error":
-            xbmcgui.Dialog().notification("Chyba", "Mazanie z databázy zlyhalo.", xbmcgui.NOTIFICATION_ERROR)
-            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
-            return
-
-        elif play_url == "not_found":
-            xbmcgui.Dialog().notification("Nenájdené", "Záznam s ident sa nenašiel.", xbmcgui.NOTIFICATION_INFO)
-            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
-            return
-
-        elif not play_url:
-            xbmcgui.Dialog().notification("Stream URL", "Nepodarilo sa získať stream URL.", xbmcgui.NOTIFICATION_ERROR)
+        if play_url in error_messages:
+            title, message, icon = error_messages[play_url]
+            xbmcgui.Dialog().notification(title, message, icon)
             xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
             return
 
         xbmc.log(f"Prehrávam film: {movie_info.get('title', 'Neznámy film')}", xbmc.LOGDEBUG)
 
-        list_item = xbmcgui.ListItem(label=movie_info.get('title', 'Neznámy film'))
+        list_item = create_compatible_list_item(
+            movie_info.get("title", "Neznámy film"),
+            movie_info.get("overview", ""),
+            movie_info.get("year", 0),
+            default_thumb
+        )
+        
         list_item.setPath(play_url)
-        list_item.setProperty('IsPlayable', 'true')
-
-        # Modern Kodi: use InfoTagVideo instead of deprecated setInfo
-        info_tag = list_item.getVideoInfoTag()
-        info_tag.setTitle(movie_info.get("title", "Neznámy film"))
-        info_tag.setPlot(movie_info.get("overview", ""))
-        try:
-            info_tag.setYear(int(movie_info.get("year", 0)))
-        except:
-            xbmc.log(f"Neplatný rok: {movie_info.get('year', 'N/A')}", xbmc.LOGERROR)
-
-        # Optional but helpful for movie handling
-        info_tag.setMediaType("movie")
-
-        # Set art
-        li.setArt({
-            'thumb': default_thumb,
-            'poster': default_thumb,
-            'fanart': default_thumb
-        })
-
-        # Now resolve the URL for Kodi to handle playback
         xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
 
         save_played_movie(movie_id)
@@ -1085,146 +1108,92 @@ def select_stream(movie_id):
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 def select_stream_serie(episodeId):
-
     try:
         episodeId = int(episodeId)
     except ValueError:
         xbmc.log(f"episodeId nie je číslo: {episodeId}", xbmc.LOGERROR)
-        xbmcgui.Dialog().notification("Chyba", "Neplatné ID epizódy.", xbmcgui.NOTIFICATION_ERROR, 3000)
+        xbmcgui.Dialog().notification("Chyba", "Neplatné ID epizódy.", xbmcgui.NOTIFICATION_ERROR)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    # Get all available files for this episode
     details = list(get_collection("episode_detail_links").find({"episodeId": episodeId}))
-    
-    # Check if details are empty
     if not details:
-        xbmcgui.Dialog().notification("Žiadne súbory", "Pre túto epizódu nie sú dostupné súbory.", xbmcgui.NOTIFICATION_INFO, 3000)
+        xbmcgui.Dialog().notification("Žiadne súbory", "Pre túto epizódu nie sú dostupné súbory.", xbmcgui.NOTIFICATION_INFO)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    # Sort najprv podľa rozlíšenia (custom poradie), potom podľa veľkosti (ako float)
     details.sort(
         key=lambda x: (
-            resolution_order.get(x.get("resolution", ""), 0),  # predvolené 0 ak chýba
+            resolution_order.get(x.get("resolution", ""), 0),
             float(x.get("size", "0").replace(" GB", ""))
         ),
-        reverse=True  # zoradenie od najvyššieho rozlíšenia a veľkosti
+        reverse=True
     )
 
-    # Get serie for thumbnail
     episode = get_collection("episodes").find_one({"episodeId": episodeId})
-    serieId = episode.get("serieId")
-    serie_info = get_collection("series").find_one({"serieId": serieId})
-    default_thumb = serie_info.get('posterUrl', 'DefaultAddonVideo.png')
-    defualt_thumb_ep = episode.get("stillUrl", serie_info.get('posterUrl', 'DefaultAddonVideo.png'))
+    serie_info = get_collection("series").find_one({"serieId": episode.get("serieId")})
     season = get_collection("seasons").find_one({"seasonId": episode.get("seasonId")})
+    thumb = episode.get("stillUrl") or serie_info.get("posterUrl", "DefaultAddonVideo.png")
 
     dialog = xbmcgui.Dialog()
     items = []
 
     for file in details:
-        audio_streams = file.get("audio", ["Neznámy"])
+        audio = file.get("audio", ["Neznámy"])
         resolution = file.get("resolution", "?")
         size = file.get("size", "?")
         bitrate = file.get("bitrate", "?")
-        video_codec = file.get("videoCodec", "?")
-        filename = file.get("name", "N/A")
+        codec = file.get("videoCodec", "?")
+        name = file.get("name", "N/A")
 
-        # Create scrollable filename with max 30 chars viewable at once
-        scrollable_filename = f"[COLOR FFFF00FF]{filename}[/COLOR]" if filename else ""
-
-        # Create the ListItem with filename
-        li = xbmcgui.ListItem(label=f"[B]{resolution}[/B]  •  [COLOR FF00FF00]{size}[/COLOR]  •  {scrollable_filename}")
-
-        # Second line (info line)
-        li.setLabel2(f"[COLOR FFFFCC00]{', '.join(audio_streams)}[/COLOR] • {bitrate} • {video_codec}")
-
-        # Set thumbnail (use actual thumbnails if available)
-        li.setArt({'thumb': defualt_thumb_ep, 'icon': 'DefaultAddonVideo.png'})
-
-        # Convert size to MB for internal use (handles "3.01 GB" format)
-        size_mb = 0
-        try:
-            size_num = float(size.split()[0])
-            if "GB" in size:
-                size_mb = int(size_num * 1024)
-            elif "MB" in size:
-                size_mb = int(size_num)
-        except (ValueError, IndexError):
-            pass
-
-        # Set additional info for skins that support it
-        li.setInfo('video', {
-            'size': size_mb,
-            'video_codec': video_codec,
-            'audio_codec': ', '.join(audio_streams)
-        })
-
+        label = f"[B]{resolution}[/B] • [COLOR FF00FF00]{size}[/COLOR] • [COLOR FFFF00FF]{name}[/COLOR]"
+        li = xbmcgui.ListItem(label=label)
+        li.setLabel2(f"[COLOR FFFFCC00]{', '.join(audio)}[/COLOR] • {bitrate} • {codec}")
+        li.setArt({'thumb': thumb})
         items.append(li)
 
-    # Use select dialog with ListItems for better visual presentation
-    index = dialog.select(
-        "Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]",
-        items,
-        useDetails=True  # This enables the two-line display with thumbnails
-    )
+    index = dialog.select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", items, useDetails=True)
 
-    if index >= 0:
-        selected_ident = details[index].get("ident")
-        play_url = ws.get_stream_url(ident=selected_ident, mongo_collection=get_collection("episode_detail_links"))
-        
-        if play_url == "deleted":
-            xbmcgui.Dialog().notification("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO)
-            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
-            return
+    if index < 0:
+        xbmcplugin.endOfDirectory(ADDON_HANDLE)
+        return
 
-        elif play_url == "unauthorized":
-            xbmcgui.Dialog().notification("Prístup odmietnutý", "Nemáš práva na mazanie z databázy.", xbmcgui.NOTIFICATION_ERROR)
-            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
-            return
+    selected_ident = details[index].get("ident")
+    play_url = ws.get_stream_url(ident=selected_ident, mongo_collection=get_collection("episode_detail_links"))
 
-        elif play_url == "delete_error":
-            xbmcgui.Dialog().notification("Chyba", "Mazanie z databázy zlyhalo.", xbmcgui.NOTIFICATION_ERROR)
-            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
-            return
+    error_messages = {
+        "deleted": ("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO),
+        "unauthorized": ("Prístup odmietnutý", "Nemáš práva na mazanie z databázy.", xbmcgui.NOTIFICATION_ERROR),
+        "delete_error": ("Chyba", "Mazanie z databázy zlyhalo.", xbmcgui.NOTIFICATION_ERROR),
+        "not_found": ("Nenájdené", "Záznam s ident sa nenašiel.", xbmcgui.NOTIFICATION_INFO),
+        "password_protected": ("Súbor je zaheslovaný", "Nie je možné ho prehrať.", xbmcgui.NOTIFICATION_ERROR),
+        "temporarily_unavailable": ("Dočasne nedostupné", "Súbor je momentálne nedostupný.", xbmcgui.NOTIFICATION_WARNING),
+        "non_public_file": ("Súkromný súbor", "Obsah nie je verejný. Môže ísť o autorsky chránené video.", xbmcgui.NOTIFICATION_ERROR),
+        None: ("Stream URL", "Nepodarilo sa získať stream URL.", xbmcgui.NOTIFICATION_ERROR)
+    }
 
-        elif play_url == "not_found":
-            xbmcgui.Dialog().notification("Nenájdené", "Záznam s ident sa nenašiel.", xbmcgui.NOTIFICATION_INFO)
-            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
-            return
+    if play_url in error_messages:
+        title, message, icon = error_messages[play_url]
+        xbmcgui.Dialog().notification(title, message, icon)
+        xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
+        return
 
-        elif not play_url:
-            xbmcgui.Dialog().notification("Stream URL", "Nepodarilo sa získať stream URL.", xbmcgui.NOTIFICATION_ERROR)
-            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
-            return
+    label = episode.get("name", "Epizóda")
+    year = serie_info.get("year", 0)
+    plot = episode.get("overview", "")
+    extra_info = {
+        "season": season.get("season_number", 1),
+        "episode": episode.get("episode_number", 1),
+        "tvshowtitle": serie_info.get("title", ""),
+        "genre": serie_info.get("genres", ""),
+        "plot": plot
+    }
 
-        li = xbmcgui.ListItem(label=episode.get("name", "Neznámy epizódy"), path=play_url)
-        li.setProperty("IsPlayable", "true")
+    list_item = create_compatible_list_item(label, plot, year, thumb, extra_info)
+    list_item.setPath(play_url)
+    xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
 
-        # Add basic metadata
-        li.setInfo("video", {
-            "title": episode.get("name", ""),
-            "season": season.get("season_number", 1),
-            "episode": episode.get("episode_number", 1),
-            "tvshowtitle": serie_info.get("title", ""),
-            "genre": serie_info.get("genres", ""),
-            "year": serie_info.get("year", ""),
-            "plot": episode.get("overview", ""),
-            "playcount": 0  # Kodi manages this automatically isf omitted
-        })
-
-        # Optional thumbnail/poster
-        li.setArt({
-            "thumb": defualt_thumb_ep,
-            "poster": defualt_thumb_ep,
-            "icon": "DefaultVideo.png"
-        })
-
-        xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, listitem=li)
-
-        save_played_series(serieId)
-
+    save_played_series(serie_info.get("serieId"))
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 # CSFD typy na dnes
