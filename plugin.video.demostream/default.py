@@ -457,7 +457,7 @@ def main_menu():
         ('Tipy na dnes (ČSFD)', 'typy_na_dnes_csfd', 'DefaultTVShows.png'),
         ('Trending filmy (posledných 14 dní) TMDB', 'list_trending_movies_last_14_days', 'DefaultMovies.png'),
         ('Top 100 populárnych filmov (CZ/SK) TMDB', 'list_top_popular_movies_czsk', 'DefaultMovies.png'),
-        ('Top 100 najlepšie hodnotených filmov (CZ/SK)', 'list_top_rated_movies_czsk', 'DefaultMovies.png'),
+        ('Top 100 najlepšie hodnotených filmov (CZ/SK) TMDB', 'list_top_rated_movies_czsk', 'DefaultMovies.png'),
         ('Filmy', 'show_movies', 'DefaultVideo.png'),
         ('Seriály', 'list_series', 'DefaultTVShows.png'),
         ('Filmy podľa názvu (A-Z)', 'list_movies_by_name', 'DefaultVideo.png'),
