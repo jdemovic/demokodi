@@ -24,6 +24,7 @@ HEADERS = {
 class WebshareClient:
     def __init__(self):
         self.token = None
+        self.salt = None
         self.user = addon.getSetting("webshare_user")
         self.passwd = addon.getSetting("webshare_pass")
         self.url = addon.getSetting("webshare_url")
@@ -88,7 +89,34 @@ class WebshareClient:
             if mongo_collection is not None:
                 doc = mongo_collection.find_one({"ident": ident})
                 if doc and "pass" in doc and doc["pass"]:
-                    payload["password"] = doc["password"]
+                    # Ziskaj salt pre ident z webshare API /file_password_salt
+                    xbmc.log(f"🔑 Načítavam heslo pre ident {ident} z webshare API.")
+                    
+                    file_salt_payload = {
+                        "ident": ident
+                    }
+
+                    file_salt_data = urllib.parse.urlencode(file_salt_payload).encode("utf-8")
+                    file_salt_req = urllib.request.Request(f"{self.url}file_password_salt/", data=file_salt_data, headers=HEADERS)
+                    
+                    # Ak sa podarí získať salt, použijeme ho na šifrovanie hesla
+                    with urllib.request.urlopen(file_salt_req) as response:
+                        file_salt_response = response.read().decode("utf-8")
+
+                    file_salt_dict = parse_xml_response(file_salt_response)
+                    if file_salt_dict.get("status") != "OK":
+                        xbmc.log("❌ Ziskanie saltu pre ident zlyhalo", xbmc.LOGERROR)
+                        return None
+
+                    self.fileSalt = file_salt_dict["salt"]
+                    xbmc.log(f"🔑 Salt pre ident {ident} získaný: {self.fileSalt}")
+                    
+                    # Šifruj heslo pomocou získaného salt a password z mongoDB
+                    ident_pass = hashlib.sha1(
+                        md5crypt(doc["pass"].encode('utf-8'), self.fileSalt.encode('utf-8')).encode('utf-8')
+                    ).hexdigest()
+                    
+                    payload["password"] = ident_pass
 
             data = urllib.parse.urlencode(payload).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers=HEADERS)

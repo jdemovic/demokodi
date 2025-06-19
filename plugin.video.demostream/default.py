@@ -70,9 +70,6 @@ MOVIE_HISTORY_FILE = os.path.join(STORAGE_DIR, 'movie_history.json')
 SERIE_HISTORY_FILE = os.path.join(STORAGE_DIR, 'serie_history.json')
 PER_PAGE = addon.getSettingInt("per_page") or 20
 
-# Webshare client
-ws = WebshareClient()
-
 # Priorita rozlíšení
 resolution_order = {
     "4K": 5,
@@ -127,11 +124,23 @@ except Exception as e:
 def get_collection(collection_name):
     return db[collection_name]
 
+def get_ws():
+    global ws
+    if 'ws' not in globals():
+        from resources.lib.webshare_client import WebshareClient
+        ws = WebshareClient()
+    return ws
+
 # Načítanie žánrov z databázy
-genre_dict = {
-    str(g["id"]): g["name"]
-    for g in get_collection("movie_genres").find()
-}
+_genre_dict_cache = None
+def get_genre_dict():
+    global _genre_dict_cache
+    if _genre_dict_cache is None:
+        _genre_dict_cache = {
+            str(g["id"]): g["name"]
+            for g in get_collection("movie_genres").find()
+        }
+    return _genre_dict_cache
 
 # Vytvorenie úložného priečinka
 os.makedirs(STORAGE_DIR, exist_ok=True)
@@ -194,32 +203,14 @@ def add_movie_listitem(movie, addon_handle):
     overview = movie.get("overview", "Žiadny popis k dispozícii.")
     vote = movie.get("vote_average")
     release_date = movie.get("release_date")
+    stream_languages = movie.get("stream_audio")
 
     url = build_url({'action': 'select_stream', 'movieId': movie_id})
 
-    # Načítanie jazykov
-    languages_str = ""
-    try:
-        audio_languages = get_collection("movie_detail").find({"fkMovieId": movie_id}).distinct("audio")
-        processed_languages = set()
-        for lang_entry in audio_languages:
-            if isinstance(lang_entry, list):
-                for lang in lang_entry:
-                    if lang:
-                        lang_code = re.split(r'[\(\)]', lang)[0].strip().upper()
-                        processed_languages.add(lang_code if lang_code != "UND" else "UND")
-            elif isinstance(lang_entry, str):
-                lang_code = re.split(r'[\(\)]', lang_entry)[0].strip().upper()
-                processed_languages.add(lang_code if lang_code != "UND" else "UND")
-
-        if processed_languages:
-            languages_str = f" [COLOR deepskyblue]{', '.join(sorted(processed_languages))}[/COLOR]"
-
-    except Exception as e:
-        xbmc.log(f"Chyba pri získavaní jazykov pre movieId {movie_id}: {str(e)}", xbmc.LOGWARNING)
+    languages_str = f" [COLOR deepskyblue]{stream_languages}[/COLOR]"
 
     # ❗ Získanie žánrov zo zoznamu ID
-    genre_names = [genre_dict.get(str(gid), f"Žáner {gid}") for gid in movie.get("genres", [])]
+    genre_names = [get_genre_dict().get(str(gid), f"Žáner {gid}") for gid in movie.get("genres", [])]
 
     # Formátovaný label
     label = f"[B]{title}[/B]"
@@ -1057,9 +1048,9 @@ def select_stream(movie_id):
         video_codec = file.get("videoCodec", "N/A")
         filename = file.get("name", "N/A")
 
-        scrollable_filename = f"[COLOR FFFF00FF]{filename}[/COLOR]" if filename else ""
-        li = xbmcgui.ListItem(label=f"[B]{resolution}[/B]  •  [COLOR FF00FF00]{size}[/COLOR]  •  {scrollable_filename}")
-        li.setLabel2(f"[COLOR FFFFCC00]{', '.join(audio_streams)}[/COLOR] • {bitrate} • {video_codec}")
+        scrollable_filename = f"[COLOR FFFFFFFF]{filename}[/COLOR]" if filename else ""
+        li = xbmcgui.ListItem(label=f"[B]{resolution}[/B]  •  [COLOR FFFFCC00]{', '.join(audio_streams)}[/COLOR]  •  [COLOR FF00FF00]{size}[/COLOR]  • {bitrate} • {video_codec}")
+        li.setLabel2(f"{scrollable_filename}")
         li.setArt({'thumb': default_thumb, 'icon': 'DefaultAddonVideo.png'})
 
         items.append(li)
@@ -1072,7 +1063,7 @@ def select_stream(movie_id):
 
     if index >= 0:
         selected_ident = details[index].get("ident")
-        play_url = ws.get_stream_url(ident=selected_ident, mongo_collection=get_collection("movie_detail"))
+        play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection=get_collection("movie_detail"))
 
         error_messages = {
             "deleted": ("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO),
@@ -1146,10 +1137,10 @@ def select_stream_serie(episodeId):
         codec = file.get("videoCodec", "?")
         name = file.get("name", "N/A")
 
-        label = f"[B]{resolution}[/B] • [COLOR FF00FF00]{size}[/COLOR] • [COLOR FFFF00FF]{name}[/COLOR]"
-        li = xbmcgui.ListItem(label=label)
-        li.setLabel2(f"[COLOR FFFFCC00]{', '.join(audio)}[/COLOR] • {bitrate} • {codec}")
-        li.setArt({'thumb': thumb})
+        scrollable_filename = f"[COLOR FFFFFFFF]{name}[/COLOR]" if name else ""
+        li = xbmcgui.ListItem(label=f"[B]{resolution}[/B]  •  [COLOR FFFFCC00]{', '.join(audio)}[/COLOR]  •  [COLOR FF00FF00]{size}[/COLOR]  • {bitrate} • {codec}")
+        li.setLabel2(f"{scrollable_filename}")
+        li.setArt({'thumb': thumb, 'icon': 'DefaultAddonVideo.png'})
         items.append(li)
 
     index = dialog.select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", items, useDetails=True)
@@ -1159,7 +1150,7 @@ def select_stream_serie(episodeId):
         return
 
     selected_ident = details[index].get("ident")
-    play_url = ws.get_stream_url(ident=selected_ident, mongo_collection=get_collection("episode_detail_links"))
+    play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection=get_collection("episode_detail_links"))
 
     error_messages = {
         "deleted": ("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO),
@@ -1388,45 +1379,36 @@ def show_latest_dubbed_movies():
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
     def fetch_dubbed_movies():
+        """Získanie dabovaných filmov s novou štruktúrou stream_audio"""
         dubbed_langs = {"CZE", "CSE", "SLK"}
+        
+        # Jediný optimalizovaný dotaz ktorý filtruje priamo v databáze
         movies = list(
-            get_collection("movies")
-            .find({"status": 1, "release_date": {"$exists": True}})
+            get_collection("movies").find({
+                "status": 1,
+                "release_date": {"$exists": True},
+                "stream_audio": {
+                    "$regex": "(CZE|CSE|SLK)",  # Hľadáme výskyty týchto kódov
+                    "$options": "i"  # Case insensitive
+                }
+            })
             .sort("release_date", -1)
-            .limit(300)
+            .limit(100)  # Už nemusíme načítavať 300, keď filtrujeme v dotaze
         )
-
+        
+        # Pre istotu ešte raz prefiltrujeme na strane klienta
         filtered = []
-
         for movie in movies:
-            movie_id = movie.get("movieId")
-            if not movie_id:
+            audio_str = movie.get("stream_audio", "")
+            if not audio_str:
                 continue
-
-            try:
-                audios = get_collection("movie_detail").find({"fkMovieId": movie_id}).distinct("audio")
-                for entry in audios:
-                    if isinstance(entry, list):
-                        for lang in entry:
-                            code = re.split(r'[\(\)]', lang)[0].strip().upper()
-                            if code in dubbed_langs:
-                                filtered.append(movie)
-                                break
-                    elif isinstance(entry, str):
-                        code = re.split(r'[\(\)]', entry)[0].strip().upper()
-                        if code in dubbed_langs:
-                            filtered.append(movie)
-
-                    if movie in filtered:
-                        break
-
-                if len(filtered) >= 100:
-                    break
-
-            except Exception as e:
-                xbmc.log(f"Chyba pri filtrovaní dabovaných filmov: {str(e)}", xbmc.LOGWARNING)
-
-        return filtered[:100]
+                
+            # Rozdelíme reťazec jazykov a skontrolujeme prítomnosť
+            audio_codes = {code.strip().upper() for code in audio_str.split(",")}
+            if audio_codes & dubbed_langs:  # Prienik množín
+                filtered.append(movie)
+        
+        return filtered[:100]  # Vrátime maximálne 100 filmov
 
     # --- CACHE na 10 minút (600 sekúnd)
     movies = redis_cache.get_or_cache("latest_dubbed_movies", fetch_dubbed_movies, ttl=600)
