@@ -68,6 +68,7 @@ STORAGE_DIR = os.path.join(profile_dir, 'store')
 SEARCH_HISTORY_FILE = os.path.join(STORAGE_DIR, 'search_terms.json')
 MOVIE_HISTORY_FILE = os.path.join(STORAGE_DIR, 'movie_history.json')
 SERIE_HISTORY_FILE = os.path.join(STORAGE_DIR, 'serie_history.json')
+WATCH_LATER_FILE = os.path.join(STORAGE_DIR, 'watch_later.json')
 PER_PAGE = addon.getSettingInt("per_page") or 20
 
 # Priorita rozlíšení
@@ -194,8 +195,44 @@ def create_compatible_list_item(title, plot, year, thumb_url, extra_info={}):
     else:
         return create_list_item_legacy(title, plot, year, thumb_url, extra_info)
 
+def create_listitem_with_context(label, info, art, url, is_folder, context_items=None):
+    li = xbmcgui.ListItem(label=label)
+    li.setInfo('video', info)
+    li.setArt(art)
+    if context_items:
+        li.addContextMenuItems(context_items)
+    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=is_folder)
+
+def load_watch_later():
+    if not os.path.exists(WATCH_LATER_FILE):
+        return []
+    with open(WATCH_LATER_FILE, 'r', encoding='utf-8') as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return []
+
+def save_watch_later(items):
+    with open(WATCH_LATER_FILE, 'w', encoding='utf-8') as f:
+        json.dump(items, f, indent=2)
+
+def add_to_watch_later(item_type, item_id):
+    items = load_watch_later()
+    if any(i for i in items if i['type'] == item_type and i['id'] == item_id):
+        return  # already exists
+    items.append({'type': item_type, 'id': item_id})
+    save_watch_later(items)
+    xbmcgui.Dialog().notification("Pridané", "Pridané do 'Pozrieť si neskôr'", xbmcgui.NOTIFICATION_INFO)
+
+def remove_from_watch_later(item_type, item_id):
+    items = load_watch_later()
+    items = [i for i in items if not (i['type'] == item_type and i['id'] == item_id)]
+    save_watch_later(items)
+    xbmcgui.Dialog().notification("Odstránené", "Odstránené zo zoznamu", xbmcgui.NOTIFICATION_INFO)
+    xbmc.executebuiltin("Container.Refresh")
+
 #-------- Pridanie položky do zoznamu pre movies --------
-def add_movie_listitem(movie, addon_handle):
+def add_movie_listitem(movie, addon_handle, context_items=None):
     title = movie.get("title")
     year = movie.get("year")
     movie_id = movie.get("movieId")
@@ -241,10 +278,14 @@ def add_movie_listitem(movie, addon_handle):
     li.setArt(art)
     li.setProperty('movie_id', str(movie_id))
     li.setProperty('IsPlayable', 'true')
+    
+    if context_items:
+        li.addContextMenuItems(context_items)
+        
     xbmcplugin.addDirectoryItem(handle=addon_handle, url=url, listitem=li, isFolder=False)
 
 #-------- Pridanie položky do zoznamu pre seriály --------
-def add_series_listitem(series, addon_handle):
+def add_series_listitem(series, addon_handle, context_items=None):
     title = series.get("title", "Neznámy názov")
     first_air_date = series.get("first_air_date")  # očakávame rok ako int alebo string
     last_air_date = series.get("last_air_date")
@@ -296,6 +337,10 @@ def add_series_listitem(series, addon_handle):
         'mediatype': 'tvshow'
     })
     li.setArt({'thumb': poster_url} if poster_url else {'thumb': 'DefaultTVShows.png'})
+    
+    if context_items:
+        li.addContextMenuItems(context_items)
+        
     xbmcplugin.addDirectoryItem(handle=addon_handle, url=url, listitem=li, isFolder=True)
 
 def add_pagination_controls(page, total_count, per_page, query=None, action='show_movies'):
@@ -446,16 +491,17 @@ def main_menu():
         ('Naposledy pridané filmy', 'show_latest_added_movies', 'DefaultRecentlyAddedMovies.png'),
         ('Naposledy pridané seriály', 'list_latest_added_series', 'DefaultRecentlyAddedEpisodes.png'),
         ('Tipy na dnes (ČSFD)', 'typy_na_dnes_csfd', 'DefaultTVShows.png'),
+        ('Pozrieť si neskôr', 'list_watch_later', 'DefaultFolder.png'),
         ('Trending filmy (posledných 14 dní) TMDB', 'list_trending_movies_last_14_days', 'DefaultMovies.png'),
         ('Top 100 populárnych filmov (CZ/SK) TMDB', 'list_top_popular_movies_czsk', 'DefaultMovies.png'),
         ('Top 100 najlepšie hodnotených filmov (CZ/SK) TMDB', 'list_top_rated_movies_czsk', 'DefaultMovies.png'),
+        ('Naposledy hľadané', 'recent_searches', 'DefaultFolder.png'),
+        ('Naposledy sledované filmy', 'recently_played', 'DefaultPlaylist.png'),
+        ('Naposledy sledované seriály', 'recently_played_series', 'DefaultPlaylist.png'),
         ('Filmy', 'show_movies', 'DefaultVideo.png'),
         ('Seriály', 'list_series', 'DefaultTVShows.png'),
         ('Filmy podľa názvu (A-Z)', 'list_movies_by_name', 'DefaultVideo.png'),
         ('Seriály podľa názvu (A-Z)', 'list_series_by_name', 'DefaultTVShows.png'),
-        ('Naposledy hľadané', 'recent_searches', 'DefaultFolder.png'),
-        ('Naposledy sledované filmy', 'recently_played', 'DefaultPlaylist.png'),
-        ('Naposledy sledované seriály', 'recently_played_series', 'DefaultPlaylist.png'),
         ('Vymazať históriu hľadania', 'clear_search_history', 'DefaultVideoDeleted.png'),
         ('Vymazať naposledy sledované zoznamy', 'clear_played_history', 'DefaultVideoDeleted.png')
     ]
@@ -1006,6 +1052,30 @@ def list_episodes(serieId, seasonId):
     finally:
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
+def list_watch_later():
+    xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Pozrieť si neskôr')
+    xbmcplugin.setContent(ADDON_HANDLE, 'videos')
+    items = load_watch_later()
+
+    for entry in items:
+        if entry['type'] == 'movie':
+            movie = get_collection("movies").find_one({"movieId": entry['id']})
+            if movie:
+                context_items = [(
+                    "Odstrániť zo zoznamu",
+                    f'RunPlugin({build_url({"action": "remove_watch_later", "type": "movie", "id": entry["id"]})})'
+                )]
+                add_movie_listitem(movie, ADDON_HANDLE, context_items)
+        elif entry['type'] == 'serie':
+            series = get_collection("series").find_one({"serieId": entry['id']})
+            if series:
+                context_items = [(
+                    "Odstrániť zo zoznamu",
+                    f'RunPlugin({build_url({"action": "remove_watch_later", "type": "serie", "id": entry["id"]})})'
+                )]
+                add_series_listitem(series, ADDON_HANDLE, context_items)
+
+    xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 def select_stream(movie_id):
 
@@ -1414,7 +1484,11 @@ def show_latest_dubbed_movies():
     movies = redis_cache.get_or_cache("latest_dubbed_movies", fetch_dubbed_movies, ttl=600)
 
     for movie in movies:
-        add_movie_listitem(movie, ADDON_HANDLE)
+        context_menu = [(
+            "Pozrieť si neskôr ...",
+            f'RunPlugin({build_url({"action": "add_watch_later", "type": "movie", "id": movie["movieId"]})})'
+        )]
+        add_movie_listitem(movie, ADDON_HANDLE, context_menu)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
@@ -1601,6 +1675,12 @@ elif action == 'list_trending_movies_last_14_days':
     list_trending_movies_last_14_days()
 elif action == 'list_top_rated_movies_czsk':
     list_top_rated_movies_czsk()
+elif action == 'add_watch_later':
+    add_to_watch_later(params.get('type'), int(params.get('id')))
+elif action == 'remove_watch_later':
+    remove_from_watch_later(params.get('type'), int(params.get('id')))
+elif action == 'list_watch_later':
+    list_watch_later()
 else:
     # Initial login and main menu
     main_menu()

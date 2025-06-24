@@ -178,7 +178,6 @@ class WebshareClient:
             xbmc.log(f"❌ Výnimka pri načítaní stream URL: {e}", xbmc.LOGERROR)
             return None
 
-
 #-------- XML parsovanie --------
 def parse_xml_response(text):
     try:

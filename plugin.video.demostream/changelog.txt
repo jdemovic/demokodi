@@ -1,3 +1,7 @@
+Version 1.0.8
+- Pridana moznost oznacit polozky ako "Pozrieť si neskôr ..."
+- Pridany prehlad "Pozrieť si neskôr"
+
 Version 1.0.7
 - moznost prehravat heslovane streamy z WS
 - uprava nacitana zvukovych stop v popise filmu koli performance
