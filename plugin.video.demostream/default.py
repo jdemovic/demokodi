@@ -279,6 +279,12 @@ def add_movie_listitem(movie, addon_handle, context_items=None):
     li.setProperty('movie_id', str(movie_id))
     li.setProperty('IsPlayable', 'true')
     
+    # 🟠 Pridaj automaticky kontextové menu, ak nie je zadané
+    if context_items is None:
+        context_items = [(
+            "Pozrieť si neskôr ...",
+            f'RunPlugin({build_url({"action": "add_watch_later", "type": "movie", "id": movie_id})})'
+        )]
     if context_items:
         li.addContextMenuItems(context_items)
         
@@ -338,6 +344,12 @@ def add_series_listitem(series, addon_handle, context_items=None):
     })
     li.setArt({'thumb': poster_url} if poster_url else {'thumb': 'DefaultTVShows.png'})
     
+    if context_items is None:
+        serie_id = series.get("serieId")
+        context_items = [(
+            "Pozrieť si neskôr ...",
+            f'RunPlugin({build_url({"action": "add_watch_later", "type": "serie", "id": serie_id})})'
+        )]
     if context_items:
         li.addContextMenuItems(context_items)
         
@@ -708,14 +720,13 @@ def list_latest_series():
     xbmcplugin.setContent(ADDON_HANDLE, 'tvshows')
 
     try:
-
-        # Add main menu link
+        # Hlavné menu späť
         url = build_url({'action': 'main_menu'})
         li = xbmcgui.ListItem(label='[B]<< Prejdi na hlavné menu[/B]')
         li.setArt({'icon': 'DefaultFolderBack.png'})
         xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
 
-        # Get latest 50 series with available episodes
+        # Najnovšie seriály s epizódami
         series_with_episodes = get_collection("episodes").aggregate([
             {"$match": {"statusWS": 1}},
             {"$group": {"_id": "$serieId"}},
@@ -732,46 +743,7 @@ def list_latest_series():
         ])
 
         for s in series_with_episodes:
-            title = s.get("title", "Neznámy názov")
-            year = s.get("year")
-            overview = s.get("overview", "")
-            poster_url = s.get("posterUrl")
-            serie_id = s.get("serieId")
-            last_air_date = s.get("last_air_date", "")
-            first_air_date = s.get("first_air_date", "")
-
-            year2title = (first_air_date.split("-")[0] + (" - " + last_air_date.split("-")[0]
-                  if last_air_date and last_air_date.split("-")[0] != first_air_date.split("-")[0]
-                  else "") if first_air_date else "")
-
-            url = build_url({'action': 'list_seasons', 'serieId': serie_id})
-            label = f"{title} [B][COLOR white][{year2title}][/COLOR][/B]" if year2title else title
-
-            # Get audio languages
-            audio_languages = get_collection("episodes").find({"serieId": serie_id}).distinct("audio")
-            if audio_languages:
-                processed_languages = set()
-                for lang in audio_languages:
-                    if lang:
-                        lang_code = re.split(r'[\(\)]', lang)[0].strip().upper()
-                        if lang_code == "UND":
-                            lang_code = "UND"
-                        processed_languages.add(lang_code)
-
-                if processed_languages:
-                    languages_str = ",".join(sorted(processed_languages))
-                    label += f" [B][COLOR white]{languages_str}[/COLOR][/B]"
-
-            li = xbmcgui.ListItem(label=label)
-            li.setInfo('video', {
-                'title': title,
-                'year': year,
-                'plot': overview,
-                'premiered': first_air_date
-            })
-            if poster_url:
-                li.setArt({'thumb': poster_url})
-            xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+            add_series_listitem(s, ADDON_HANDLE)
 
     except ConnectionFailure:
         xbmc.log("MongoDB connection failed in list_latest_series", xbmc.LOGERROR)
@@ -1484,11 +1456,7 @@ def show_latest_dubbed_movies():
     movies = redis_cache.get_or_cache("latest_dubbed_movies", fetch_dubbed_movies, ttl=600)
 
     for movie in movies:
-        context_menu = [(
-            "Pozrieť si neskôr ...",
-            f'RunPlugin({build_url({"action": "add_watch_later", "type": "movie", "id": movie["movieId"]})})'
-        )]
-        add_movie_listitem(movie, ADDON_HANDLE, context_menu)
+        add_movie_listitem(movie, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
