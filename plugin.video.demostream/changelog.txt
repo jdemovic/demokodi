@@ -1,3 +1,6 @@
+Version 1.0.9
+- Hotfix hidden parametre
+
 Version 1.0.8
 - Pridana moznost oznacit polozky ako "Pozrieť si neskôr ..."
 - Pridany prehlad "Pozrieť si neskôr"

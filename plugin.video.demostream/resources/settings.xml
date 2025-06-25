@@ -2,8 +2,8 @@
     <category label="Nastavenia MongoDB">
         <setting id="mongodb_user" type="text" label="MongoDB používateľ" default="" />
         <setting id="mongodb_pass" type="text" label="MongoDB heslo" default="" option="hidden" />
-        <setting id="mongodb_host" type="text" label="MongoDB host (URI)" default="demolator.app" />
-        <setting id="mongodb_db" type="text" label="MongoDB databáza" default="sc3" />
+        <setting id="mongodb_host" type="text" label="MongoDB host (URI)" default="demolator.app" option="hidden"/>
+        <setting id="mongodb_db" type="text" label="MongoDB databáza" default="sc3" option="hidden"/>
     </category>
     <category label="Nastavenia Webshare">
         <setting id="webshare_user" type="text" label="Webshare používateľ" default="" />
