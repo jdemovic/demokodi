@@ -8,7 +8,7 @@
     <category label="Nastavenia Webshare">
         <setting id="webshare_user" type="text" label="Webshare používateľ" default="" />
         <setting id="webshare_pass" type="text" label="Webshare heslo" default="" option="hidden" />
-        <setting id="webshare_url" type="text" label="webshare url" default="https://webshare.cz/api/" />
+        <setting id="webshare_url" type="text" label="webshare url" default="https://webshare.cz/api/" option="hidden"/>
     </category>
     <category label="TMDB API">
         <setting id="tmdb_api_key" type="text" label="TMDB API kľúč" default="0195edd0dfc6c90117e6fc7fe70a320c" option="hidden"/>

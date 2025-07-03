@@ -1,3 +1,6 @@
+Version 1.1.0
+- Performance improvements
+
 Version 1.0.9
 - Hotfix hidden parametre
 

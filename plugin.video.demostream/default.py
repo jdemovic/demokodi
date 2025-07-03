@@ -498,7 +498,8 @@ def main_menu():
     menu_items = [
         ('Vyhľadávanie', 'search', 'DefaultAddonsSearch.png'),
         ('Najnovšie filmy', 'show_latest_movies', 'DefaultRecentlyAddedMovies.png'),
-        ('Novinky dabované', 'show_latest_dubbed_movies', 'DefaultRecentlyAddedMovies.png'),
+        ('Novinky dabované (dátum vydania)', 'show_latest_dubbed_movies', 'DefaultRecentlyAddedMovies.png'),
+        ('Filmy s CZ/SK dabingom (najnovší stream)', 'show_movies_with_cz_audio', 'DefaultRecentlyAddedMovies.png'),
         ('Najnovšie seriály', 'list_latest_series', 'DefaultRecentlyAddedEpisodes.png'),
         ('Naposledy pridané filmy', 'show_latest_added_movies', 'DefaultRecentlyAddedMovies.png'),
         ('Naposledy pridané seriály', 'list_latest_added_series', 'DefaultRecentlyAddedEpisodes.png'),
@@ -711,6 +712,58 @@ def show_latest_added_movies(page=1):
 
     # Navigácia dole
     add_pagination_controls(page, count, PER_PAGE, action='show_latest_added_movies')
+
+    xbmcplugin.endOfDirectory(ADDON_HANDLE)
+
+#-------- Filmy s CZ/SK dabingom (podľa najnovšieho streamu) --------
+def show_movies_with_cz_audio(page=1):
+    xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Filmy s CZ/SK dabingom')
+    xbmcplugin.setContent(ADDON_HANDLE, 'movies')
+
+    skip_count = (page - 1) * PER_PAGE
+
+    # 1. Nájdeme všetky fkMovieId, ktoré majú požadované audio stopy
+    detail_cursor = get_collection("movie_detail").find({
+        "audio": {
+            "$elemMatch": {
+                "$regex": "(CZE|SLO|SLK)", "$options": "i"
+            }
+        }
+    }).sort("_id", -1)
+
+    # 2. Získame unikátne movieId, v poradí podľa najnovšieho detailu
+    movie_ids_ordered = []
+    seen_ids = set()
+    for detail in detail_cursor:
+        mid = detail["fkMovieId"]
+        if mid not in seen_ids:
+            seen_ids.add(mid)
+            movie_ids_ordered.append(mid)
+    
+    # 3. Vyberieme len tie ID, ktoré patria do tejto stránky
+    paged_movie_ids = movie_ids_ordered[skip_count:skip_count + PER_PAGE]
+
+    # 4. Načítame filmy z kolekcie "movies"
+    movies = get_collection("movies").find({
+        "movieId": { "$in": paged_movie_ids },
+        "status": 1
+    })
+
+    movies_dict = {movie["movieId"]: movie for movie in movies}
+
+    # 5. Zoradíme filmy podľa poradia ID (lebo find s $in nevracia zoradene)
+    sorted_movies = [movies_dict[mid] for mid in paged_movie_ids if mid in movies_dict]
+
+    # Navigácia hore
+    add_pagination_controls(page, 0, PER_PAGE, action='show_movies_with_cz_audio')
+
+    count = 0
+    for movie in sorted_movies:
+        count += 1
+        add_movie_listitem(movie, ADDON_HANDLE)
+
+    # Navigácia dole
+    add_pagination_controls(page, count, PER_PAGE, action='show_movies_with_cz_audio')
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
@@ -1637,6 +1690,9 @@ elif action == 'list_series_by_name':
     list_series_by_name(params.get('initial'), int(params.get('length', 1)))
 elif action == 'show_latest_dubbed_movies':
     show_latest_dubbed_movies()
+elif action == 'show_movies_with_cz_audio':
+    page = int(params.get('page', '1'))
+    show_movies_with_cz_audio(page=page)
 elif action == 'list_top_popular_movies_czsk':
     list_top_popular_movies_czsk()
 elif action == 'list_trending_movies_last_14_days':
