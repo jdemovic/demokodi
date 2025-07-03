@@ -1,5 +1,8 @@
 Version 1.1.0
 - Performance improvements
+- Pridané a upravené nové možnosti prehľadov:
+  - Filmy s CZ/SK dabingom (podľa najnovšieho streamu)
+  - Novinky dabované (dátum vydania)
 
 Version 1.0.9
 - Hotfix hidden parametre
