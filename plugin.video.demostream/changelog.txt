@@ -1,3 +1,6 @@
+Version 1.1.1
+- Performance improvements pre "Filmy s CZ/SK dabingom (podľa najnovšieho streamu)"
+
 Version 1.1.0
 - Performance improvements
 - Pridané a upravené nové možnosti prehľadov:
