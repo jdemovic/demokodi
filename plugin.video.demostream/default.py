@@ -1161,9 +1161,13 @@ def select_stream(movie_id):
         video_codec = file.get("videoCodec", "N/A")
         filename = file.get("name", "N/A")
 
-        scrollable_filename = f"[COLOR FFFFFFFF]{filename}[/COLOR]" if filename else ""
+        if "-dmstrm." in filename:
+            display_filename = "[COLOR FFFF8800]Demo[/COLOR][COLOR FFFFFFFF]Stream[/COLOR]"
+        else:
+            display_filename = f"[COLOR FFFFFFFF]{filename}[/COLOR]"
+
         li = xbmcgui.ListItem(label=f"[B]{resolution}[/B]  •  [COLOR FFFFCC00]{', '.join(audio_streams)}[/COLOR]  •  [COLOR FF00FF00]{size}[/COLOR]  • {bitrate} • {video_codec}")
-        li.setLabel2(f"{scrollable_filename}")
+        li.setLabel2(display_filename)
         li.setArt({'thumb': default_thumb, 'icon': 'DefaultAddonVideo.png'})
 
         items.append(li)
