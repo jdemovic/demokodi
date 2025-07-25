@@ -6,10 +6,11 @@ import urllib.parse
 import hashlib
 import sys
 import os
+from resources.lib import mongo_api  # Import mongo_api pre REST volania
 
 # Získaj cestu k hlavnému adresáru addon-u
 addon = xbmcaddon.Addon()
-addon_path = addon.getAddonInfo("path")  # cesta, ak potrebuješ
+addon_path = addon.getAddonInfo("path")
 sys.path.append(addon_path)
 from md5crypt import md5crypt
 
@@ -20,14 +21,14 @@ HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
     "Accept": "text/xml"
 }
-  
+
 class WebshareClient:
     def __init__(self):
         self.token = None
         self.salt = None
         self.user = addon.getSetting("webshare_user")
         self.passwd = addon.getSetting("webshare_pass")
-        self.url = addon.getSetting("webshare_url")
+        self.url = "https://webshare.cz/api/"
         self.realm = ":Webshare:"
 
     def login(self):
@@ -85,12 +86,15 @@ class WebshareClient:
             url = self.url + "file_link/"
             payload = {"ident": ident, "wst": self.token}
 
-            # ➕ Získaj heslo z MongoDB, ak kolekcia bola poskytnutá
+            # ➕ Získaj heslo z MongoDB cez REST API, ak kolekcia bola poskytnutá
             if mongo_collection is not None:
-                doc = mongo_collection.find_one({"ident": ident})
-                if doc and "pass" in doc and doc["pass"]:
-                    # Ziskaj salt pre ident z webshare API /file_password_salt
-                    xbmc.log(f"🔑 Načítavam heslo pre ident {ident} z webshare API.")
+                doc = mongo_api.get_item(collection=mongo_collection, field="ident", value=ident)
+                if doc is None:
+                    xbmc.log(f"❌ Dokument s ident {ident} nebol nájdený v kolekcii {mongo_collection}", xbmc.LOGERROR)
+                    return None
+                if "pass" in doc and doc["pass"]:
+                    # Získaj salt pre ident z webshare API /file_password_salt
+                    xbmc.log(f"🔑 Načítavam heslo pre ident {ident} z webshare API.", xbmc.LOGDEBUG)
                     
                     file_salt_payload = {
                         "ident": ident
@@ -105,13 +109,13 @@ class WebshareClient:
 
                     file_salt_dict = parse_xml_response(file_salt_response)
                     if file_salt_dict.get("status") != "OK":
-                        xbmc.log("❌ Ziskanie saltu pre ident zlyhalo", xbmc.LOGERROR)
+                        xbmc.log("❌ Získanie saltu pre ident zlyhalo", xbmc.LOGERROR)
                         return None
 
                     self.fileSalt = file_salt_dict["salt"]
-                    xbmc.log(f"🔑 Salt pre ident {ident} získaný: {self.fileSalt}")
+                    xbmc.log(f"🔑 Salt pre ident {ident} získaný: {self.fileSalt}", xbmc.LOGDEBUG)
                     
-                    # Šifruj heslo pomocou získaného salt a password z mongoDB
+                    # Šifruj heslo pomocou získaného salt a password z MongoDB
                     ident_pass = hashlib.sha1(
                         md5crypt(doc["pass"].encode('utf-8'), self.fileSalt.encode('utf-8')).encode('utf-8')
                     ).hexdigest()
@@ -153,16 +157,16 @@ class WebshareClient:
                         if user_choice:
                             if mongo_collection is not None:
                                 try:
-                                    result = mongo_collection.delete_one({"ident": ident})
-                                    if result.deleted_count > 0:
-                                        xbmc.log(f"🗑️ Dokument s ident {ident} vymazaný z kolekcie.", xbmc.LOGINFO)
+                                    result = mongo_api.delete_item(mongo_collection, "ident", ident)
+                                    if result.get("deleted_count", 0) > 0:
+                                        xbmc.log(f"🗑️ Dokument s ident {ident} vymazaný z kolekcie {mongo_collection}.", xbmc.LOGINFO)
                                         return "deleted"
                                     else:
                                         xbmc.log(f"⚠️ Dokument s ident {ident} sa nenašiel na vymazanie.", xbmc.LOGWARNING)
                                         return "not_found"
                                 except Exception as e:
                                     error_message = str(e)
-                                    if "not authorized" in error_message or "Unauthorized" in error_message:
+                                    if "not authorized" in error_message.lower():
                                         xbmc.log("🚫 Používateľ nemá práva na mazanie z MongoDB.", xbmc.LOGERROR)
                                         return "unauthorized"
                                     else:

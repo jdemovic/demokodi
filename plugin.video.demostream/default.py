@@ -18,14 +18,13 @@ addon_dir = os.path.dirname(__file__)
 sys.path.append(os.path.join(addon_dir, 'resources', 'lib', 'python'))
 
 from bson import ObjectId
-from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
 from urllib.parse import parse_qsl
 from urllib import request, parse
 from tmdb.searchTMDBMulti import search_movie_tmdb
 from resources.lib.webshare_client import WebshareClient
 from resources.lib.csfd_client import fetch_csfd_tip_titles
 from redis_cache import redis_cache
+from resources.lib import mongo_api
 
 try:
     from xbmc import translatePath
@@ -34,17 +33,11 @@ except ImportError:
 
 # Načítanie nastavení doplnku
 addon = xbmcaddon.Addon()
-mongodb_user = addon.getSetting("mongodb_user")
-mongodb_pass = addon.getSetting("mongodb_pass")
-mongodb_host = addon.getSetting("mongodb_host")
-mongodb_db   = addon.getSetting("mongodb_db")
 webshare_user = addon.getSetting("webshare_user")
 webshare_pass = addon.getSetting("webshare_pass")
 
 # Skontroluj chýbajúce
 missing_settings = []
-if not mongodb_user: missing_settings.append("MongoDB - používateľ")
-if not mongodb_pass: missing_settings.append("MongoDB - heslo")
 if not webshare_user: missing_settings.append("Webshare - používateľ")
 if not webshare_pass: missing_settings.append("Webshare - heslo")
 
@@ -80,50 +73,9 @@ resolution_order = {
     "480p": 1
 }
 
-# MongoDB Connection Manager
-class MongoDBConnection:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize()
-        return cls._instance
-
-    def _initialize(self):
-        try:
-            uri = f"mongodb://{mongodb_user}:{mongodb_pass}@{mongodb_host}/{mongodb_db}?authSource={mongodb_db}"
-            self.client = MongoClient(uri, maxPoolSize=50, connectTimeoutMS=5000, socketTimeoutMS=30000)
-            self.db = self.client[mongodb_db]
-        except Exception as e:
-            xbmc.log(f"[SC3] MongoDB init error: {e}", xbmc.LOGERROR)
-            raise e
-
-    def get_db(self):
-        try:
-            self.client.admin.command('ping')
-            return self.db
-        except ConnectionFailure as e:
-            xbmc.log(f"[SC3] MongoDB ping failed: {e}", xbmc.LOGERROR)
-            raise e
-
-    def close(self):
-        if self.client:
-            self.client.close()
-        self._instance = None
-
-# Bezpečné pripojenie k databáze
-try:
-    db_connection = MongoDBConnection()
-    db = db_connection.get_db()
-except Exception as e:
-    xbmcgui.Dialog().ok("Chyba MongoDB", "Nepodarilo sa pripojiť do databázy.\nSkontrolujte údaje v nastaveniach doplnku.")
-    xbmc.log(f"[SC3] MongoDB Connection Error: {e}", xbmc.LOGERROR)
-    sys.exit()
-
-# Pomocná funkcia na získanie kolekcie
-def get_collection(collection_name):
-    return db[collection_name]
+# Pomocná funkcia na získanie kolekcie - už nie je potrebná
+# def get_collection(collection_name):
+#     return db[collection_name]
 
 def get_ws():
     global ws
@@ -139,7 +91,7 @@ def get_genre_dict():
     if _genre_dict_cache is None:
         _genre_dict_cache = {
             str(g["id"]): g["name"]
-            for g in get_collection("movie_genres").find()
+            for g in mongo_api.get_items("movie_genres")
         }
     return _genre_dict_cache
 
@@ -572,12 +524,12 @@ def process_tmdb_search_results(query, page=1):
 
         if media_type == "movie":
             # Check movies collection
-            movie = get_collection("movies").find_one({"tmdbId": tmdb_id, "status": 1})
-            if movie:
+            movie = mongo_api.get_item("movies", "tmdbId", tmdb_id)
+            if movie and movie.get("status") == 1:
                 movies_found.append(movie)
         elif media_type == "tv":
             # Check series collection
-            series = get_collection("series").find_one({"tmdbId": tmdb_id})
+            series = mongo_api.get_item("series", "tmdbId", tmdb_id)
             if series:
                 series_found.append(series)
 
@@ -618,7 +570,6 @@ def show_movies(query=None, page=1):
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Výsledky vyhľadávania' if query else 'Filmy')
     xbmcplugin.setContent(ADDON_HANDLE, 'videos')
     try:
-
         if query is None:
             mongo_query = {"status": 1}
         elif isinstance(query, str):
@@ -637,16 +588,15 @@ def show_movies(query=None, page=1):
 
         movies = redis_cache.get_or_cache(
             cache_key,
-            lambda: list(
-                get_collection("movies")
-                .find(mongo_query)
-                .sort("movieId", -1)
-                .skip(skip_count)
-                .limit(PER_PAGE)
+            lambda: mongo_api.get_items(
+                "movies",
+                query=mongo_query,
+                sort={"movieId": -1},
+                skip=skip_count,
+                limit=PER_PAGE
             ),
             ttl=600
         )
-        #movies = get_collection("movies").find(mongo_query).sort("movieId", -1).skip(skip_count).limit(PER_PAGE)
 
         # Pridaj navigáciu na začiatok
         add_pagination_controls(page, 0, PER_PAGE, query, action='show_movies')
@@ -659,11 +609,9 @@ def show_movies(query=None, page=1):
         # Pridaj navigáciu na koniec, ak treba
         add_pagination_controls(page, count, PER_PAGE, query, action='show_movies')
 
-    except ConnectionFailure:
-        xbmc.log("MongoDB connection failed in show_movies", xbmc.LOGERROR)
-        xbmcgui.Dialog().notification("Chyba", "Problém s připojením k databázi", xbmcgui.NOTIFICATION_ERROR)
     except Exception as e:
         xbmc.log(f"Error in show_movies: {str(e)}", xbmc.LOGERROR)
+        xbmcgui.Dialog().notification("Chyba", "Problém s pripojením k API", xbmcgui.NOTIFICATION_ERROR)
     finally:
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
@@ -673,8 +621,14 @@ def show_latest_movies(page=1):
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
     skip_count = (page - 1) * PER_PAGE
-    
-    movies = get_collection("movies").find({"status": 1}).sort("release_date", -1).skip(skip_count).limit(PER_PAGE)
+
+    movies = mongo_api.get_items(
+        "movies",
+        query={"status": 1},
+        sort={"release_date": -1},
+        skip=skip_count,
+        limit=PER_PAGE
+    )
 
     movies_list = list(movies)
 
@@ -691,14 +645,20 @@ def show_latest_movies(page=1):
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
-# Zoznam filmov podla datumu vydaniapridania
+# Zoznam filmov podla datumu pridania
 def show_latest_added_movies(page=1):
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Najnovšie pridané filmy')
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
     skip_count = (page - 1) * PER_PAGE
 
-    movies = get_collection("movies").find({"status": 1}).sort("movieId", -1).skip(skip_count).limit(PER_PAGE)
+    movies = mongo_api.get_items(
+        "movies",
+        query={"status": 1},
+        sort={"movieId": -1},
+        skip=skip_count,
+        limit=PER_PAGE
+    )
 
     movies_list = list(movies)
 
@@ -752,7 +712,7 @@ def show_movies_with_cz_audio(page=1):
         }
     ]
 
-    result = get_collection("movie_detail").aggregate(pipeline)
+    result = mongo_api.run_aggregation("movie_detail", pipeline)
     all_movie_ids = [doc["_id"] for doc in result]  # _id tu je fkMovieId
 
     # 2. Vyber len tie pre aktuálnu stránku
@@ -763,13 +723,13 @@ def show_movies_with_cz_audio(page=1):
         return
 
     # 3. Načítaj príslušné filmy z kolekcie movies
-    movies_cursor = get_collection("movies").find({
-        "movieId": { "$in": paged_movie_ids },
-        "status": 1
-    })
+    movies = mongo_api.get_items(
+        "movies",
+        query={"movieId": {"$in": paged_movie_ids}, "status": 1}
+    )
 
     # 4. Zoradenie podľa pôvodného poradia
-    movies_dict = {m["movieId"]: m for m in movies_cursor}
+    movies_dict = {m["movieId"]: m for m in movies}
     sorted_movies = [movies_dict[mid] for mid in paged_movie_ids if mid in movies_dict]
 
     # 5. Navigácia hore
@@ -798,7 +758,7 @@ def list_latest_series():
         xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
 
         # Najnovšie seriály s epizódami
-        series_with_episodes = get_collection("episodes").aggregate([
+        series_with_episodes = mongo_api.run_aggregation("episodes", [
             {"$match": {"statusWS": 1}},
             {"$group": {"_id": "$serieId"}},
             {"$lookup": {
@@ -816,11 +776,9 @@ def list_latest_series():
         for s in series_with_episodes:
             add_series_listitem(s, ADDON_HANDLE)
 
-    except ConnectionFailure:
-        xbmc.log("MongoDB connection failed in list_latest_series", xbmc.LOGERROR)
-        xbmcgui.Dialog().notification("Chyba", "Problém s připojením k databázi", xbmcgui.NOTIFICATION_ERROR)
     except Exception as e:
         xbmc.log(f"Error in list_latest_series: {str(e)}", xbmc.LOGERROR)
+        xbmcgui.Dialog().notification("Chyba", "Problém s pripojením k API", xbmcgui.NOTIFICATION_ERROR)
     finally:
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
@@ -832,7 +790,7 @@ def list_latest_added_series(page=1):
     skip_count = (page - 1) * PER_PAGE
 
     # Get latest 50 series with available episodes
-    series_with_episodes = get_collection("episodes").aggregate([
+    series_with_episodes = mongo_api.run_aggregation("episodes", [
         {"$match": {"statusWS": 1}},
         {"$group": {"_id": "$serieId"}},
         {"$lookup": {
@@ -898,7 +856,7 @@ def list_played_movies():
         return
 
     for movie_id in history:
-        movie = get_collection("movies").find_one({"movieId": movie_id})
+        movie = mongo_api.get_item("movies", "movieId", movie_id)
         if movie:
             add_movie_listitem(movie, ADDON_HANDLE)
 
@@ -917,8 +875,8 @@ def list_played_series():
         return
 
     for serie_id in history:
-        series = get_collection("series").find_one({"serieId": serie_id})
-        if series:  # ← pridaná kontrola
+        series = mongo_api.get_item("series", "serieId", serie_id)
+        if series:
             add_series_listitem(series, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
@@ -930,7 +888,7 @@ def list_series(page=1):
 
     skip_count = (page - 1) * PER_PAGE
 
-    series_with_episodes = get_collection("episodes").aggregate([
+    series_with_episodes = mongo_api.run_aggregation("episodes", [
         {"$match": {"statusWS": 1}},
         {"$group": {"_id": "$serieId"}},
         {"$lookup": {
@@ -961,7 +919,6 @@ def list_series(page=1):
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
-
 def list_seasons(serieId):
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Sezóny')
     xbmcplugin.setContent(ADDON_HANDLE, 'seasons')
@@ -972,14 +929,14 @@ def list_seasons(serieId):
         cache_key = f"seasons_{serieId}"
         all_seasons = redis_cache.get_or_cache(
             cache_key,
-            lambda: list(get_collection("seasons").find({"serieId": serieId})),
+            lambda: mongo_api.get_items("seasons", query={"serieId": serieId}),
             ttl=600
         )
 
-        available_counts = list(get_collection("episodes").aggregate([
+        available_counts = mongo_api.run_aggregation("episodes", [
             {"$match": {"serieId": serieId, "statusWS": 1}},
             {"$group": {"_id": "$seasonId", "count": {"$sum": 1}}}
-        ]))
+        ])
         
         available_dict = {s["_id"]: s["count"] for s in available_counts}
 
@@ -1020,7 +977,6 @@ def list_seasons(serieId):
     finally:
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
-
 def list_episodes(serieId, seasonId):
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Epizódy')
     xbmcplugin.setContent(ADDON_HANDLE, 'episodes')
@@ -1029,16 +985,16 @@ def list_episodes(serieId, seasonId):
         serieId = int(serieId)
         seasonId = int(seasonId)
 
-        season_data = get_collection("seasons").find_one({"serieId": serieId, "seasonId": seasonId})
+        season_data = mongo_api.get_item("seasons", "seasonId", seasonId)
         season_num = season_data.get("season_number", 1) if season_data else 1
 
         episodes = redis_cache.get_or_cache(
             f"episodes_{serieId}_{seasonId}",
-            lambda: list(get_collection("episodes").find({
-                "serieId": serieId,
-                "seasonId": seasonId,
-                "statusWS": 1
-            }).sort("episode_number", 1)),
+            lambda: mongo_api.get_items(
+                "episodes",
+                query={"serieId": serieId, "seasonId": seasonId, "statusWS": 1},
+                sort={"episode_number": 1}
+            ),
             ttl=600
         )
 
@@ -1102,7 +1058,7 @@ def list_watch_later():
 
     for entry in items:
         if entry['type'] == 'movie':
-            movie = get_collection("movies").find_one({"movieId": entry['id']})
+            movie = mongo_api.get_item("movies", "movieId", entry['id'])
             if movie:
                 context_items = [(
                     "Odstrániť zo zoznamu",
@@ -1110,7 +1066,7 @@ def list_watch_later():
                 )]
                 add_movie_listitem(movie, ADDON_HANDLE, context_items)
         elif entry['type'] == 'serie':
-            series = get_collection("series").find_one({"serieId": entry['id']})
+            series = mongo_api.get_item("series", "serieId", entry['id'])
             if series:
                 context_items = [(
                     "Odstrániť zo zoznamu",
@@ -1121,7 +1077,6 @@ def list_watch_later():
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 def select_stream(movie_id):
-
     try:
         movie_id = int(movie_id)
     except ValueError:
@@ -1130,7 +1085,7 @@ def select_stream(movie_id):
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    details = list(get_collection("movie_detail").find({"fkMovieId": movie_id}))
+    details = mongo_api.get_items("movie_detail", query={"fkMovieId": movie_id})
 
     if not details:
         xbmcgui.Dialog().notification("Žiadne súbory", "Pre tento film nie sú dostupné žiadne súbory.", xbmcgui.NOTIFICATION_INFO, 3000)
@@ -1147,8 +1102,8 @@ def select_stream(movie_id):
     )
 
     # Get movie details for thumbnail
-    movie_info = get_collection("movies").find_one({"movieId": movie_id})
-    default_thumb = movie_info.get('posterUrl', 'DefaultAddonVideo.png')
+    movie_info = mongo_api.get_item("movies", "movieId", movie_id)
+    default_thumb = movie_info.get('posterUrl', 'DefaultAddonVideo.png') if movie_info else 'DefaultAddonVideo.png'
 
     dialog = xbmcgui.Dialog()
     items = []
@@ -1180,7 +1135,7 @@ def select_stream(movie_id):
 
     if index >= 0:
         selected_ident = details[index].get("ident")
-        play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection=get_collection("movie_detail"))
+        play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection="movie_detail")
 
         error_messages = {
             "deleted": ("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO),
@@ -1224,7 +1179,7 @@ def select_stream_serie(episodeId):
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    details = list(get_collection("episode_detail_links").find({"episodeId": episodeId}))
+    details = mongo_api.get_items("episode_detail_links", query={"episodeId": episodeId})
     if not details:
         xbmcgui.Dialog().notification("Žiadne súbory", "Pre túto epizódu nie sú dostupné súbory.", xbmcgui.NOTIFICATION_INFO)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
@@ -1238,10 +1193,10 @@ def select_stream_serie(episodeId):
         reverse=True
     )
 
-    episode = get_collection("episodes").find_one({"episodeId": episodeId})
-    serie_info = get_collection("series").find_one({"serieId": episode.get("serieId")})
-    season = get_collection("seasons").find_one({"seasonId": episode.get("seasonId")})
-    thumb = episode.get("stillUrl") or serie_info.get("posterUrl", "DefaultAddonVideo.png")
+    episode = mongo_api.get_item("episodes", "episodeId", episodeId)
+    serie_info = mongo_api.get_item("series", "serieId", episode.get("serieId")) if episode else None
+    season = mongo_api.get_item("seasons", "seasonId", episode.get("seasonId")) if episode else None
+    thumb = episode.get("stillUrl") or (serie_info.get("posterUrl", "DefaultAddonVideo.png") if serie_info else "DefaultAddonVideo.png")
 
     dialog = xbmcgui.Dialog()
     items = []
@@ -1267,7 +1222,7 @@ def select_stream_serie(episodeId):
         return
 
     selected_ident = details[index].get("ident")
-    play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection=get_collection("episode_detail_links"))
+    play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection="episode_detail_links")
 
     error_messages = {
         "deleted": ("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO),
@@ -1286,14 +1241,14 @@ def select_stream_serie(episodeId):
         xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
         return
 
-    label = episode.get("name", "Epizóda")
-    year = serie_info.get("year", 0)
-    plot = episode.get("overview", "")
+    label = episode.get("name", "Epizóda") if episode else "Epizóda"
+    year = serie_info.get("year", 0) if serie_info else 0
+    plot = episode.get("overview", "") if episode else ""
     extra_info = {
-        "season": season.get("season_number", 1),
-        "episode": episode.get("episode_number", 1),
-        "tvshowtitle": serie_info.get("title", ""),
-        "genre": serie_info.get("genres", ""),
+        "season": season.get("season_number", 1) if season else 1,
+        "episode": episode.get("episode_number", 1) if episode else 1,
+        "tvshowtitle": serie_info.get("title", "") if serie_info else "",
+        "genre": serie_info.get("genres", "") if serie_info else "",
         "plot": plot
     }
 
@@ -1301,7 +1256,8 @@ def select_stream_serie(episodeId):
     list_item.setPath(play_url)
     xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
 
-    save_played_series(serie_info.get("serieId"))
+    if serie_info:
+        save_played_series(serie_info.get("serieId"))
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 # CSFD typy na dnes
@@ -1316,11 +1272,8 @@ def typy_na_dnes_csfd():
 
         movies = []
         for item in results:
-            movie = get_collection("movies").find_one({
-                "title": {"$regex": f"^{re.escape(item['title'])}$", "$options": "i"},
-                "year": item["year"]
-            })
-            if movie:
+            movie = mongo_api.get_item("movies", "title", item["title"], query={"year": item["year"]})
+            if movie and movie.get("status") == 1:
                 movies.append(movie)
         return movies
 
@@ -1344,10 +1297,11 @@ def get_movies_by_initial(initial, length=1):
     
     return redis_cache.get_or_cache(
         cache_key,
-        lambda: list(get_collection("movies").find({
-            "title": {"$regex": f'^{re.escape(initial)}', "$options": "i"},
-            "status": 1
-        }).sort("title", 1)),
+        lambda: mongo_api.get_items(
+            "movies",
+            query={"title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}, "status": 1},
+            sort={"title": 1}
+        ),
         ttl=600 # 10 minut
     )
 
@@ -1357,7 +1311,7 @@ def get_series_by_initial(initial, length=1):
     
     return redis_cache.get_or_cache(
         cache_key,
-        lambda: list(get_collection("series").aggregate([
+        lambda: mongo_api.run_aggregation("series", [
             {"$match": {
                 "title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}
             }},
@@ -1371,7 +1325,7 @@ def get_series_by_initial(initial, length=1):
                 "episodes.statusWS": 1
             }},
             {"$sort": {"title": 1}}
-        ])),
+        ]),
         ttl=600  # 10 minut
     )
 
@@ -1499,35 +1453,29 @@ def show_latest_dubbed_movies():
         """Získanie dabovaných filmov s novou štruktúrou stream_audio"""
         dubbed_langs = {"CZE", "CSE", "SLK"}
         
-        # Jediný optimalizovaný dotaz ktorý filtruje priamo v databáze
-        movies = list(
-            get_collection("movies").find({
+        movies = mongo_api.get_items(
+            "movies",
+            query={
                 "status": 1,
                 "release_date": {"$exists": True},
-                "stream_audio": {
-                    "$regex": "(CZE|CSE|SLK)",  # Hľadáme výskyty týchto kódov
-                    "$options": "i"  # Case insensitive
-                }
-            })
-            .sort("release_date", -1)
-            .limit(100)  # Už nemusíme načítavať 300, keď filtrujeme v dotaze
+                "stream_audio": {"$regex": "(CZE|CSE|SLK)", "$options": "i"}
+            },
+            sort={"release_date": -1},
+            limit=100
         )
         
-        # Pre istotu ešte raz prefiltrujeme na strane klienta
         filtered = []
         for movie in movies:
             audio_str = movie.get("stream_audio", "")
             if not audio_str:
                 continue
                 
-            # Rozdelíme reťazec jazykov a skontrolujeme prítomnosť
             audio_codes = {code.strip().upper() for code in audio_str.split(",")}
-            if audio_codes & dubbed_langs:  # Prienik množín
+            if audio_codes & dubbed_langs:
                 filtered.append(movie)
         
-        return filtered[:100]  # Vrátime maximálne 100 filmov
+        return filtered[:100]
 
-    # --- CACHE na 10 minút (600 sekúnd)
     movies = redis_cache.get_or_cache("latest_dubbed_movies", fetch_dubbed_movies, ttl=600)
 
     for movie in movies:
@@ -1540,7 +1488,6 @@ def list_top_popular_movies_czsk():
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
     def fetch_tmdb_popular_ids():
-
         popular_ids = []
         api_key = addon.getSetting("tmdb_api_key")
 
@@ -1560,8 +1507,8 @@ def list_top_popular_movies_czsk():
 
     found_movies = []
     for tmdb_id in tmdb_ids:
-        movie = get_collection("movies").find_one({"tmdbId": tmdb_id, "status": 1})
-        if movie:
+        movie = mongo_api.get_item("movies", "tmdbId", tmdb_id)
+        if movie and movie.get("status") == 1:
             found_movies.append(movie)
         if len(found_movies) >= 100:
             break
@@ -1571,13 +1518,11 @@ def list_top_popular_movies_czsk():
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
-
 def list_trending_movies_last_14_days():
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Trending filmy (posledných 14 dní)')
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
     def fetch_trending_ids():
-
         trending_ids = set()
         api_key = addon.getSetting("tmdb_api_key")
 
@@ -1590,7 +1535,7 @@ def list_trending_movies_last_14_days():
                         for item in data.get("results", []):
                             trending_ids.add(item["id"])
                 except Exception as e:
-                    xbmc.log(f"Chyba pri načítaní trending filmov ({period}): {e}", xbmc.LOGWARNING)
+                    xbc.log(f"Chyba pri načítaní trending filmov ({period}): {e}", xbc.LOGWARNING)
 
         return list(trending_ids)
 
@@ -1598,8 +1543,8 @@ def list_trending_movies_last_14_days():
 
     found_movies = []
     for tmdb_id in tmdb_ids:
-        movie = get_collection("movies").find_one({"tmdbId": tmdb_id, "status": 1})
-        if movie:
+        movie = mongo_api.get_item("movies", "tmdbId", tmdb_id)
+        if movie and movie.get("status") == 1:
             found_movies.append(movie)
         if len(found_movies) >= 100:
             break
@@ -1614,11 +1559,10 @@ def list_top_rated_movies_czsk():
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
     def fetch_top_rated_ids():
-
         top_rated_ids = []
         api_key = addon.getSetting("tmdb_api_key")
 
-        for page in range(1, 6):  # 5 strán po 20 = 100 filmov
+        for page in range(1, 6):
             url = f"https://api.themoviedb.org/3/movie/top_rated?api_key={api_key}&language=cs-CZ&region=CZ&page={page}"
             try:
                 with request.urlopen(url, timeout=10) as response:
@@ -1634,8 +1578,8 @@ def list_top_rated_movies_czsk():
 
     found_movies = []
     for tmdb_id in tmdb_ids:
-        movie = get_collection("movies").find_one({"tmdbId": tmdb_id, "status": 1})
-        if movie:
+        movie = mongo_api.get_item("movies", "tmdbId", tmdb_id)
+        if movie and movie.get("status") == 1:
             found_movies.append(movie)
         if len(found_movies) >= 100:
             break

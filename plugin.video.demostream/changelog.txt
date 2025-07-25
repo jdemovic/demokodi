@@ -1,3 +1,6 @@
+Version 1.2.0
+- Napojenie na mongoDB API, namiesto prihlasovania sa lokalne cez klienta (credentials)
+
 Version 1.1.2
 - Uprava v nazve streamu ak sa jedna o DemoStream upload
 

@@ -1,4 +1,4 @@
-<addon id="plugin.video.demostream" name="DemoStream" version="1.1.2" provider-name="Speed99">
+<addon id="plugin.video.demostream" name="DemoStream" version="1.2.0" provider-name="Speed99">
     <requires>
         <import addon="xbmc.python" version="3.0.0" />
     </requires>
@@ -8,8 +8,7 @@
     <extension point="xbmc.addon.metadata">
         <summary>Osobný WS player, ktorý využíva verejne dostupné informácie a spája ich</summary>
         <description lang="sk"> Komplexný KODI doplnok pre prehliadanie a prehrávanie filmov a
-seriálov z osobnej databázy a služby Webshare. Na správne fungovanie je potrebné zadať prihlasovacie údaje do
-databázy a WS. </description>
+seriálov z osobnej databázy a služby Webshare. Na správne fungovanie je potrebné zadať prihlasovacie údaje do Webshare. </description>
         <platform>all</platform>
         <assets>
             <icon>icon.png</icon>

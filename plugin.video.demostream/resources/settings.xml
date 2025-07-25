@@ -1,14 +1,7 @@
 <settings>
-    <category label="Nastavenia MongoDB">
-        <setting id="mongodb_user" type="text" label="MongoDB používateľ" default="" />
-        <setting id="mongodb_pass" type="text" label="MongoDB heslo" default="" option="hidden" />
-        <setting id="mongodb_host" type="text" label="MongoDB host (URI)" default="demolator.app" option="hidden"/>
-        <setting id="mongodb_db" type="text" label="MongoDB databáza" default="sc3" option="hidden"/>
-    </category>
     <category label="Nastavenia Webshare">
         <setting id="webshare_user" type="text" label="Webshare používateľ" default="" />
         <setting id="webshare_pass" type="text" label="Webshare heslo" default="" option="hidden" />
-        <setting id="webshare_url" type="text" label="webshare url" default="https://webshare.cz/api/" option="hidden"/>
     </category>
     <category label="TMDB API">
         <setting id="tmdb_api_key" type="text" label="TMDB API kľúč" default="0195edd0dfc6c90117e6fc7fe70a320c" option="hidden"/>
