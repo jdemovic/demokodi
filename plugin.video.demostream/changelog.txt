@@ -1,3 +1,6 @@
+Version 1.2.1
+- Uprava zoradenia prehladov a oznacenie internych streamov aj pre serialy
+
 Version 1.2.0
 - Napojenie na mongoDB API, namiesto prihlasovania sa lokalne cez klienta (credentials)
 

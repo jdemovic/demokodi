@@ -449,26 +449,26 @@ def main_menu():
     # Vytvorenie položiek menu
     menu_items = [
         ('Vyhľadávanie', 'search', 'DefaultAddonsSearch.png'),
+        ('Naposledy hľadané', 'recent_searches', 'DefaultFolder.png'),
+        ('Naposledy sledované filmy', 'recently_played', 'DefaultPlaylist.png'),
+        ('Naposledy sledované seriály', 'recently_played_series', 'DefaultPlaylist.png'),
         ('Najnovšie filmy', 'show_latest_movies', 'DefaultRecentlyAddedMovies.png'),
         ('Novinky dabované (dátum vydania)', 'show_latest_dubbed_movies', 'DefaultRecentlyAddedMovies.png'),
         ('Filmy s CZ/SK dabingom (najnovší stream)', 'show_movies_with_cz_audio', 'DefaultRecentlyAddedMovies.png'),
         ('Najnovšie seriály', 'list_latest_series', 'DefaultRecentlyAddedEpisodes.png'),
-        ('Naposledy pridané filmy', 'show_latest_added_movies', 'DefaultRecentlyAddedMovies.png'),
-        ('Naposledy pridané seriály', 'list_latest_added_series', 'DefaultRecentlyAddedEpisodes.png'),
         ('Tipy na dnes (ČSFD)', 'typy_na_dnes_csfd', 'DefaultTVShows.png'),
-        ('Pozrieť si neskôr', 'list_watch_later', 'DefaultFolder.png'),
         ('Trending filmy (posledných 14 dní) TMDB', 'list_trending_movies_last_14_days', 'DefaultMovies.png'),
         ('Top 100 populárnych filmov (CZ/SK) TMDB', 'list_top_popular_movies_czsk', 'DefaultMovies.png'),
         ('Top 100 najlepšie hodnotených filmov (CZ/SK) TMDB', 'list_top_rated_movies_czsk', 'DefaultMovies.png'),
-        ('Naposledy hľadané', 'recent_searches', 'DefaultFolder.png'),
-        ('Naposledy sledované filmy', 'recently_played', 'DefaultPlaylist.png'),
-        ('Naposledy sledované seriály', 'recently_played_series', 'DefaultPlaylist.png'),
-        ('Filmy', 'show_movies', 'DefaultVideo.png'),
-        ('Seriály', 'list_series', 'DefaultTVShows.png'),
+        ('Naposledy pridané filmy', 'show_latest_added_movies', 'DefaultRecentlyAddedMovies.png'),
+        ('Naposledy pridané seriály', 'list_latest_added_series', 'DefaultRecentlyAddedEpisodes.png'),
+        ('Pozrieť si neskôr', 'list_watch_later', 'DefaultFolder.png'),
         ('Filmy podľa názvu (A-Z)', 'list_movies_by_name', 'DefaultVideo.png'),
         ('Seriály podľa názvu (A-Z)', 'list_series_by_name', 'DefaultTVShows.png'),
         ('Vymazať históriu hľadania', 'clear_search_history', 'DefaultVideoDeleted.png'),
-        ('Vymazať naposledy sledované zoznamy', 'clear_played_history', 'DefaultVideoDeleted.png')
+        ('Vymazať naposledy sledované zoznamy', 'clear_played_history', 'DefaultVideoDeleted.png'),
+        ('Filmy', 'show_movies', 'DefaultVideo.png'),
+        ('Seriály', 'list_series', 'DefaultTVShows.png')
     ]
 
     # Pridanie položiek do menu
@@ -1209,9 +1209,13 @@ def select_stream_serie(episodeId):
         codec = file.get("videoCodec", "?")
         name = file.get("name", "N/A")
 
-        scrollable_filename = f"[COLOR FFFFFFFF]{name}[/COLOR]" if name else ""
+        if "-dmstrm." in name:
+            display_filename = "[COLOR FFFF8800]Demo[/COLOR][COLOR FFFFFFFF]Stream[/COLOR]"
+        else:
+            display_filename = f"[COLOR FFFFFFFF]{name}[/COLOR]"
+        
         li = xbmcgui.ListItem(label=f"[B]{resolution}[/B]  •  [COLOR FFFFCC00]{', '.join(audio)}[/COLOR]  •  [COLOR FF00FF00]{size}[/COLOR]  • {bitrate} • {codec}")
-        li.setLabel2(f"{scrollable_filename}")
+        li.setLabel2(f"{display_filename}")
         li.setArt({'thumb': thumb, 'icon': 'DefaultAddonVideo.png'})
         items.append(li)
 
