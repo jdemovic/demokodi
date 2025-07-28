@@ -1,3 +1,6 @@
+Version 1.2.2
+- Privatne streamy su zobrazene pri vybere ako prve
+
 Version 1.2.1
 - Uprava zoradenia prehladov a oznacenie internych streamov aj pre serialy
 

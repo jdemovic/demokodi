@@ -1092,23 +1092,29 @@ def select_stream(movie_id):
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    # Sort najprv podľa rozlíšenia (custom poradie), potom podľa veľkosti (ako float)
-    details.sort(
-        key=lambda x: (
-            resolution_order.get(x.get("resolution", ""), 0),  # predvolené 0 ak chýba
-            float(x.get("size", "0").replace(" GB", ""))
-        ),
-        reverse=True  # zoradenie od najvyššieho rozlíšenia a veľkosti
-    )
+    # Rozdelenie a zoradenie DESCENDING
+    dmstrm_files = [f for f in details if "-dmstrm." in f.get("name", "").lower()]
+    other_files = [f for f in details if "-dmstrm." not in f.get("name", "").lower()]
 
-    # Get movie details for thumbnail
+    def sort_key(file):
+        return (
+            -resolution_order.get(file.get("resolution", ""), 0),  # Mínus pre DESCENDING
+            -float(file.get("size", "0").replace(" GB", ""))       # Mínus pre DESCENDING
+        )
+
+    dmstrm_files.sort(key=sort_key)
+    other_files.sort(key=sort_key)
+
+    sorted_details = dmstrm_files + other_files
+
+    # Získanie detailov filmu pre thumbnail
     movie_info = mongo_api.get_item("movies", "movieId", movie_id)
     default_thumb = movie_info.get('posterUrl', 'DefaultAddonVideo.png') if movie_info else 'DefaultAddonVideo.png'
 
     dialog = xbmcgui.Dialog()
     items = []
 
-    for file in details:
+    for file in sorted_details:
         audio_streams = file.get("audio", [])
         resolution = file.get("resolution", "N/A")
         size = file.get("size", "N/A")
@@ -1134,7 +1140,7 @@ def select_stream(movie_id):
     )
 
     if index >= 0:
-        selected_ident = details[index].get("ident")
+        selected_ident = sorted_details[index].get("ident")
         play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection="movie_detail")
 
         error_messages = {
@@ -1185,13 +1191,20 @@ def select_stream_serie(episodeId):
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    details.sort(
-        key=lambda x: (
-            resolution_order.get(x.get("resolution", ""), 0),
-            float(x.get("size", "0").replace(" GB", ""))
-        ),
-        reverse=True
-    )
+    # Rozdelenie a zoradenie
+    dmstrm_files = [f for f in details if "-dmstrm." in f.get("name", "").lower()]
+    other_files = [f for f in details if "-dmstrm." not in f.get("name", "").lower()]
+
+    def sort_key(file):
+        return (
+            -resolution_order.get(file.get("resolution", ""), 0),  # Mínus pre DESCENDING
+            -float(file.get("size", "0").replace(" GB", ""))   # Mínus pre DESCENDING
+        )
+
+    dmstrm_files.sort(key=sort_key)
+    other_files.sort(key=sort_key)
+
+    sorted_details = dmstrm_files + other_files
 
     episode = mongo_api.get_item("episodes", "episodeId", episodeId)
     serie_info = mongo_api.get_item("series", "serieId", episode.get("serieId")) if episode else None
@@ -1201,7 +1214,7 @@ def select_stream_serie(episodeId):
     dialog = xbmcgui.Dialog()
     items = []
 
-    for file in details:
+    for file in sorted_details:
         audio = file.get("audio", ["Neznámy"])
         resolution = file.get("resolution", "?")
         size = file.get("size", "?")
@@ -1225,7 +1238,7 @@ def select_stream_serie(episodeId):
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    selected_ident = details[index].get("ident")
+    selected_ident = sorted_details[index].get("ident")
     play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection="episode_detail_links")
 
     error_messages = {
