@@ -105,51 +105,80 @@ def format_time(seconds):
 def create_list_item_legacy(title, plot, year, thumb_url, extra_info={}):
     li = xbmcgui.ListItem(label=title)
     info = {
-        "title": title,
-        "plot": plot,
-        "year": int(year) if str(year).isdigit() else None,
-        "mediatype": "episode"
+        "title": title or "",
+        "plot": plot or "",
+        "year": year or 0,
+        "mediatype": "video"
     }
     info.update(extra_info)
-    li.setInfo("video", info)
+    li.setInfo("video", info)  # fallback pre staršie Kodi
     li.setArt({'thumb': thumb_url, 'poster': thumb_url, 'fanart': thumb_url})
     li.setProperty("IsPlayable", "true")
     return li
 
 def create_list_item_modern(title, plot, year, thumb_url, extra_info={}):
     li = xbmcgui.ListItem(label=title)
-    try:
-        tag = li.getVideoInfoTag()
-        tag.setTitle(title)
-        tag.setPlot(plot)
-        if str(year).isdigit():
-            tag.setYear(int(year))
-        tag.setMediaType("episode")
-    except Exception as e:
-        xbmc.log(f"[SC3] Fallback InfoTag: {e}", xbmc.LOGDEBUG)
-        li.setInfo("video", {
-            "title": title,
-            "plot": plot,
-            "year": int(year) if str(year).isdigit() else None,
-            "mediatype": "episode"
-        })
+    info = {
+        "title": title or "",
+        "plot": plot or "",
+        "year": year or 0,
+        "mediatype": "video"
+    }
+    info.update(extra_info)
+    set_video_info_tag(li, info)
     li.setArt({'thumb': thumb_url, 'poster': thumb_url, 'fanart': thumb_url})
     li.setProperty("IsPlayable", "true")
     return li
 
-def create_compatible_list_item(title, plot, year, thumb_url, extra_info={}):
+def create_compatible_list_item(title, plot, year, thumb_url, extra_info=None):
+    if extra_info is None:
+        extra_info = {}
+    
+    # Create base info dict
+    info = {
+        'title': str(title) if title is not None else "",
+        'plot': str(plot) if plot is not None else "",
+        'mediatype': extra_info.get('mediatype', 'video')
+    }
+    
+    # Handle year - ensure it's either int or None
+    try:
+        info['year'] = int(year) if year is not None and str(year).strip() else None
+    except (ValueError, TypeError):
+        info['year'] = None
+    
+    # Merge with extra info
+    info.update(extra_info)
+    
+    # Create list item
+    li = xbmcgui.ListItem(label=str(title) if title is not None else xbmcgui.ListItem())
+    
     try:
         kodi_major = int(xbmc.getInfoLabel("System.BuildVersion").split(".")[0])
     except:
-        kodi_major = 18
+        kodi_major = 18  # fallback
+
     if kodi_major >= 20:
-        return create_list_item_modern(title, plot, year, thumb_url, extra_info)
+        set_video_info_tag(li, info)
     else:
-        return create_list_item_legacy(title, plot, year, thumb_url, extra_info)
+        # For older Kodi versions, use setInfo
+        li.setInfo('video', info)
+    
+    # Set art
+    art = {'thumb': thumb_url, 'poster': thumb_url, 'fanart': thumb_url}
+    li.setArt(art)
+    
+    return li
 
 def create_listitem_with_context(label, info, art, url, is_folder, context_items=None):
-    li = xbmcgui.ListItem(label=label)
-    li.setInfo('video', info)
+    li = create_compatible_list_item(
+        title=info.get('title', ''),
+        plot=info.get('plot', ''),
+        year=info.get('year', 0),
+        thumb_url=art.get('thumb', ''),
+        extra_info=info
+    )
+    li.setLabel(label)
     li.setArt(art)
     if context_items:
         li.addContextMenuItems(context_items)
@@ -189,49 +218,43 @@ def add_movie_listitem(movie, addon_handle, context_items=None):
     year = movie.get("year")
     movie_id = movie.get("movieId")
     poster_url = movie.get("posterUrl")
-    overview = movie.get("overview", "Žiadny popis k dispozícii.")
+    overview = movie.get("overview", "Žiadny popis k dispozícii.")  # Získanie popisu
     vote = movie.get("vote_average")
     release_date = movie.get("release_date")
     stream_languages = movie.get("stream_audio")
 
     url = build_url({'action': 'select_stream', 'movieId': movie_id})
 
-    languages_str = f" [COLOR deepskyblue]{stream_languages}[/COLOR]"
-
-    # ❗ Získanie žánrov zo zoznamu ID
-    genre_names = [get_genre_dict().get(str(gid), f"Žáner {gid}") for gid in movie.get("genres", [])]
-
-    # Formátovaný label
+    # Formátovanie labelu
     label = f"[B]{title}[/B]"
     if year:
         label += f" [COLOR grey]({year})[/COLOR]"
     if vote:
         label += f" [COLOR gold]{vote:.1f}★[/COLOR]"
-    label += languages_str
+    if stream_languages:
+        label += f" [COLOR deepskyblue]{stream_languages}[/COLOR]"
 
-    # Video info
-    info = {
-        'title': title,
-        'year': int(year) if year and str(year).isdigit() else None,
-        'plot': overview,
-        'rating': float(vote) if vote else None,
-        'premiered': release_date if release_date else None,
-        'genre': ", ".join(genre_names) if genre_names else None
+    # Vytvorenie extra_info s metadátami
+    extra_info = {
+        "plot": overview,  # Priamy predaj popisu
+        "rating": float(vote) if vote else None,
+        "premiered": release_date,
+        "genre": ", ".join([get_genre_dict().get(str(gid), "") for gid in movie.get("genres", [])])
     }
 
-    li = xbmcgui.ListItem(label=label)
-    li.setInfo('video', info)
-    # Poster / Fanart / Thumb
-    art = {
-        'thumb': poster_url or 'DefaultVideo.png',
-        'poster': poster_url or 'DefaultVideo.png',
-        'fanart': poster_url or 'DefaultVideo.png'
-    }
-    li.setArt(art)
+    # Vytvorenie kompatibilnej položky
+    li = create_compatible_list_item(
+        title=title,
+        plot=overview,  # Popis sa predáva aj tu
+        year=year,
+        thumb_url=poster_url or 'DefaultVideo.png',
+        extra_info=extra_info  # Všetky metadáta
+    )
+    li.setLabel(label)
     li.setProperty('movie_id', str(movie_id))
     li.setProperty('IsPlayable', 'true')
-    
-    # 🟠 Pridaj automaticky kontextové menu, ak nie je zadané
+
+    # Pridanie kontextového menu
     if context_items is None:
         context_items = [(
             "Pozrieť si neskôr ...",
@@ -239,68 +262,46 @@ def add_movie_listitem(movie, addon_handle, context_items=None):
         )]
     if context_items:
         li.addContextMenuItems(context_items)
-        
+
     xbmcplugin.addDirectoryItem(handle=addon_handle, url=url, listitem=li, isFolder=False)
 
 #-------- Pridanie položky do zoznamu pre seriály --------
 def add_series_listitem(series, addon_handle, context_items=None):
     title = series.get("title", "Neznámy názov")
-    first_air_date = series.get("first_air_date")  # očakávame rok ako int alebo string
-    last_air_date = series.get("last_air_date")
     serie_id = series.get("serieId")
     poster_url = series.get("posterUrl")
     overview = series.get("overview", "Žiadny popis k dispozícii.")
-
+    
+    # Handle year information
+    first_air_date = series.get("first_air_date", "")
+    year = int(first_air_date[:4]) if first_air_date and first_air_date[:4].isdigit() else None
+    
     url = build_url({'action': 'list_seasons', 'serieId': serie_id})
-
-    # Initialize variables
-    first_year = None
-    last_year = None
-    year_label = ""
-
-    try:
-        # Pokúsime sa získať len rok (4 číslice) z dátumu, ak je to string, alebo použiť priamo int
-        def extract_year(value):
-            if value is None:
-                return None
-            if isinstance(value, int):
-                return value
-            if isinstance(value, str):
-                # napr. '2021-09-15' alebo len '2021'
-                return int(value[:4])
-            return None
-
-        first_year = extract_year(first_air_date)
-        last_year = extract_year(last_air_date)
-
-        if first_year and last_year:
-            if first_year == last_year:
-                year_label = f"{first_year}"
-            else:
-                year_label = f"{first_year} - {last_year}"
-        elif first_year:
-            year_label = f"{first_year}"
-        elif last_year:
-            year_label = f"{last_year}"
-    except Exception:
-        year_label = ""
-
-    # Formátovaný label
+    
+    # Format label
     label = f"[B]{title}[/B]"
-    if year_label:
-        label += f" [COLOR grey]({year_label})[/COLOR]"
+    if year:
+        label += f" [COLOR grey]({year})[/COLOR]"
+    
+    # Prepare extra info
+    extra_info = {
+        'mediatype': 'tvshow',
+        'tvshowtitle': title,
+        'year': year,
+        'premiered': first_air_date,
+        'genre': ", ".join([get_genre_dict().get(str(gid), "") for gid in series.get("genres", [])])
+    }
 
-    li = xbmcgui.ListItem(label=label)
-    li.setInfo('video', {
-        'title': title,
-        'year': first_year or last_year,  # pre metadata stačí jeden rok
-        'plot': overview,
-        'mediatype': 'tvshow'
-    })
-    li.setArt({'thumb': poster_url} if poster_url else {'thumb': 'DefaultTVShows.png'})
+    li = create_compatible_list_item(
+        title=title,
+        plot=overview,
+        year=year,
+        thumb_url=poster_url or 'DefaultTVShows.png',
+        extra_info=extra_info
+    )
+    li.setLabel(label)
     
     if context_items is None:
-        serie_id = series.get("serieId")
         context_items = [(
             "Pozrieť si neskôr ...",
             f'RunPlugin({build_url({"action": "add_watch_later", "type": "serie", "id": serie_id})})'
@@ -584,21 +585,12 @@ def show_movies(query=None, page=1):
 
         skip_count = (page - 1) * PER_PAGE
         
-        # bezpečný cache key
-        query_str = json.dumps(mongo_query, sort_keys=True)
-        query_hash = hashlib.md5(query_str.encode("utf-8")).hexdigest()
-        cache_key = f"movies_{query_hash}_{skip_count}_{PER_PAGE}"
-
-        movies = redis_cache.get_or_cache(
-            cache_key,
-            lambda: mongo_api.get_items(
-                "movies",
-                query=mongo_query,
-                sort={"movieId": -1},
-                skip=skip_count,
-                limit=PER_PAGE
-            ),
-            ttl=600
+        movies = mongo_api.get_items(
+            "movies",
+            query=mongo_query,
+            sort={"movieId": -1},
+            skip=skip_count,
+            limit=PER_PAGE
         )
 
         # Pridaj navigáciu na začiatok
@@ -641,6 +633,7 @@ def show_latest_movies(page=1):
     count = 0
     for movie in movies_list:
         count += 1
+        # Pridané správne predanie plotu a ďalších metadát
         add_movie_listitem(movie, ADDON_HANDLE)
 
     # Navigácia dole
@@ -928,13 +921,9 @@ def list_seasons(serieId):
 
     try:
         serieId = int(serieId)
-        
-        cache_key = f"seasons_{serieId}"
-        all_seasons = redis_cache.get_or_cache(
-            cache_key,
-            lambda: mongo_api.get_items("seasons", query={"serieId": serieId}),
-            ttl=600
-        )
+        serie_info = mongo_api.get_item("series", "serieId", serieId)
+
+        all_seasons =  mongo_api.get_items("seasons", query={"serieId": serieId})
 
         available_counts = mongo_api.run_aggregation("episodes", [
             {"$match": {"serieId": serieId, "statusWS": 1}},
@@ -947,32 +936,32 @@ def list_seasons(serieId):
             season_id = season["seasonId"]
             season_num = season["season_number"]
             name = season.get("name") or f"Sezóna {season_num}"
-            year = season.get("air_date", "")[:4] if season.get("air_date") else ""
+            air_date = season.get("air_date", "")
+            year = air_date[:4] if air_date else ""
             ep_count = available_dict.get(season_id, 0)
 
-            # Label
             label = f"[B]{name}[/B]"
             if year:
                 label += f" [COLOR grey]({year})[/COLOR]"
             if ep_count > 0:
                 label += f" [COLOR lightgreen]{ep_count} epizód[/COLOR]"
 
-            li = xbmcgui.ListItem(label=label)
-            li.setInfo('video', {
-                'title': name,
-                'plot': season.get("overview", ""),
-                'premiered': season.get("air_date", ""),
+            extra_info = {
+                'mediatype': 'season',
+                'tvshowtitle': serie_info.get("title", ""),
+                'premiered': air_date,
                 'season': season_num,
-                'episode': season.get("episode_count", 0),
-                'mediatype': 'season'
-            })
+                'episode': season.get("episode_count", 0)
+            }
 
-            if season.get("posterUrl"):
-                li.setArt({
-                    'thumb': season["posterUrl"],
-                    'poster': season["posterUrl"],
-                    'fanart': season["posterUrl"]
-                })
+            li = create_compatible_list_item(
+                title=name,
+                plot=season.get("overview", ""),
+                year=year,
+                thumb_url=season.get("posterUrl") or serie_info.get("posterUrl", "DefaultTVShows.png"),
+                extra_info=extra_info
+            )
+            li.setLabel(label)
 
             url = build_url({'action': 'list_episodes', 'serieId': serieId, 'seasonId': season_id})
             xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
@@ -988,33 +977,33 @@ def list_episodes(serieId, seasonId):
         serieId = int(serieId)
         seasonId = int(seasonId)
 
+        serie_info = mongo_api.get_item("series", "serieId", serieId)
         season_data = mongo_api.get_item("seasons", "seasonId", seasonId)
         season_num = season_data.get("season_number", 1) if season_data else 1
 
-        episodes = redis_cache.get_or_cache(
-            f"episodes_{serieId}_{seasonId}",
-            lambda: mongo_api.get_items(
-                "episodes",
-                query={"serieId": serieId, "seasonId": seasonId, "statusWS": 1},
-                sort={"episode_number": 1}
-            ),
-            ttl=600
+        episodes = mongo_api.get_items(  # Priamy dotaz
+            "episodes",
+            query={"serieId": serieId, "seasonId": seasonId, "statusWS": 1},
+            sort={"episode_number": 1}
         )
 
         for episode in episodes:
             ep_num = episode.get("episode_number", 0)
             ep_title = episode.get("name", f"Epizóda {ep_num}")
-            aired = episode.get("air_date", "")
-            aired_str = ""
-            try:
-                aired_str = datetime.strptime(aired, '%Y-%m-%d').strftime('%d.%m.%Y') if aired else ""
-            except:
-                pass
+            aired = episode.get("air_date")
+            
+            # Fix for None air_date
+            if aired:
+                try:
+                    aired_str = datetime.strptime(aired, '%Y-%m-%d').strftime('%d.%m.%Y')
+                except:
+                    aired_str = aired  # fallback to original format if parsing fails
+            else:
+                aired_str = ""
 
             rating = episode.get("vote_average", 0)
             runtime = episode.get("runtime", 0)
 
-            # Formátovaný label
             label = f"[B]{ep_num}. {ep_title}[/B]"
             if aired_str:
                 label += f" [COLOR grey]({aired_str})[/COLOR]"
@@ -1027,28 +1016,27 @@ def list_episodes(serieId, seasonId):
             if details:
                 label += f" [COLOR orange]{' • '.join(details)}[/COLOR]"
 
-            li = xbmcgui.ListItem(label=label)
-            li.setInfo('video', {
-                'title': ep_title,
-                'plot': episode.get("overview", "Bez popisu."),
+            extra_info = {
+                'mediatype': 'episode',
+                'tvshowtitle': serie_info.get("title", ""),
                 'season': season_num,
                 'episode': ep_num,
-                'aired': aired,
-                'rating': rating,
-                'votes': episode.get("vote_count", 0),
-                'duration': runtime,
-                'mediatype': 'episode'
-            })
+                'premiered': aired,
+                'rating': float(rating) if rating else None,
+                'duration': int(runtime) * 60 if runtime else None  # Convert to seconds
+            }
 
-            if episode.get("stillUrl"):
-                li.setArt({
-                    'thumb': episode["stillUrl"],
-                    'poster': episode["stillUrl"],
-                    'fanart': episode["stillUrl"]
-                })
+            li = create_compatible_list_item(
+                title=ep_title,
+                plot=episode.get("overview", "Bez popisu."),
+                year=aired[:4] if aired else None,
+                thumb_url=episode.get("stillUrl") or season_data.get("posterUrl") or serie_info.get("posterUrl", "DefaultTVShows.png"),
+                extra_info=extra_info
+            )
+            li.setLabel(label)
+            li.setProperty('IsPlayable', 'true')
 
             url = build_url({'action': 'select_stream_serie', 'episodeId': episode["episodeId"]})
-            li.setProperty('IsPlayable', 'true')
             xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=False)
 
     finally:
@@ -1079,38 +1067,94 @@ def list_watch_later():
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
+def set_video_info_tag(li, info):
+    try:
+        tag = li.getVideoInfoTag()
+        
+        # Basic info
+        tag.setTitle(info.get('title', ''))
+        tag.setPlot(info.get('plot', ''))
+        
+        # Handle numeric values
+        if 'year' in info and info['year']:
+            try:
+                tag.setYear(int(info['year']))
+            except (ValueError, TypeError):
+                pass
+        
+        # Handle media type
+        tag.setMediaType(info.get('mediatype', 'video'))
+        
+        # TV Show specific
+        if info.get('mediatype') == 'tvshow':
+            tag.setTvShowTitle(info.get('tvshowtitle', ''))
+        
+        # Season/episode info
+        if 'season' in info:
+            try:
+                tag.setSeason(int(info['season']))
+            except (ValueError, TypeError):
+                pass
+                
+        if 'episode' in info:
+            try:
+                tag.setEpisode(int(info['episode']))
+            except (ValueError, TypeError):
+                pass
+        
+        # Dates
+        if 'premiered' in info and info['premiered']:
+            tag.setPremiered(info['premiered'])
+        
+        # Rating
+        if 'rating' in info and info['rating'] is not None:
+            try:
+                tag.setRating(float(info['rating']), 0)
+            except (ValueError, TypeError):
+                pass
+        
+        # Duration (in seconds)
+        if 'duration' in info and info['duration']:
+            try:
+                tag.setDuration(int(info['duration']))
+            except (ValueError, TypeError):
+                pass
+        
+        # Genres
+        if 'genre' in info:
+            if isinstance(info['genre'], list):
+                tag.setGenres(info['genre'])
+            elif isinstance(info['genre'], str):
+                tag.setGenres([g.strip() for g in info['genre'].split(',') if g.strip()])
+                
+    except Exception as e:
+        xbmc.log(f"[Demostream] InfoTag error: {str(e)}", xbmc.LOGERROR)
+
 def select_stream(movie_id):
     try:
         movie_id = int(movie_id)
     except ValueError:
         xbmc.log(f"movie_id nie je číslo: {movie_id}", xbmc.LOGERROR)
-        xbmcgui.Dialog().notification("Chyba", "Neplatné ID filmu.", xbmcgui.NOTIFICATION_ERROR, 3000)
-        xbmcplugin.endOfDirectory(ADDON_HANDLE)
+        xbmcgui.Dialog().notification("Chyba", "Neplatné ID filmu.", xbmcgui.NOTIFICATION_ERROR)
         return
 
     details = mongo_api.get_items("movie_detail", query={"fkMovieId": movie_id})
-
     if not details:
-        xbmcgui.Dialog().notification("Žiadne súbory", "Pre tento film nie sú dostupné žiadne súbory.", xbmcgui.NOTIFICATION_INFO, 3000)
-        xbmcplugin.endOfDirectory(ADDON_HANDLE)
+        xbmcgui.Dialog().notification("Žiadne súbory", "Pre tento film nie sú dostupné žiadne súbory.", xbmcgui.NOTIFICATION_INFO)
         return
 
-    # Rozdelenie a zoradenie DESCENDING
+    # Rozdelenie a zoradenie
     dmstrm_files = [f for f in details if "-dmstrm." in f.get("name", "").lower()]
     other_files = [f for f in details if "-dmstrm." not in f.get("name", "").lower()]
-
     def sort_key(file):
         return (
-            -resolution_order.get(file.get("resolution", ""), 0),  # Mínus pre DESCENDING
-            -float(file.get("size", "0").replace(" GB", ""))       # Mínus pre DESCENDING
+            -resolution_order.get(file.get("resolution", ""), 0),
+            -float(file.get("size", "0").replace(" GB", ""))
         )
-
     dmstrm_files.sort(key=sort_key)
     other_files.sort(key=sort_key)
-
     sorted_details = dmstrm_files + other_files
 
-    # Získanie detailov filmu pre thumbnail
     movie_info = mongo_api.get_item("movies", "movieId", movie_id)
     default_thumb = movie_info.get('posterUrl', 'DefaultAddonVideo.png') if movie_info else 'DefaultAddonVideo.png'
 
@@ -1118,66 +1162,56 @@ def select_stream(movie_id):
     items = []
 
     for file in sorted_details:
-        audio_streams = file.get("audio", [])
+        audio = file.get("audio", ["Neznámy"])
         resolution = file.get("resolution", "N/A")
         size = file.get("size", "N/A")
         bitrate = file.get("bitrate", "N/A")
-        video_codec = file.get("videoCodec", "N/A")
+        codec = file.get("videoCodec", "N/A")
         filename = file.get("name", "N/A")
 
-        if "-dmstrm." in filename:
-            display_filename = "[COLOR FFFF8800]Demo[/COLOR][COLOR FFFFFFFF]Stream[/COLOR]"
-        else:
-            display_filename = f"[COLOR FFFFFFFF]{filename}[/COLOR]"
+        display_filename = "[COLOR FFFF8800]Demo[/COLOR][COLOR FFFFFFFF]Stream[/COLOR]" if "-dmstrm." in filename.lower() else f"[COLOR FFFFFFFF]{filename}[/COLOR]"
 
-        li = xbmcgui.ListItem(label=f"[B]{resolution}[/B]  •  [COLOR FFFFCC00]{', '.join(audio_streams)}[/COLOR]  •  [COLOR FF00FF00]{size}[/COLOR]  • {bitrate} • {video_codec}")
+        li = xbmcgui.ListItem(label=f"[B]{resolution}[/B] • [COLOR FFFFCC00]{', '.join(audio)}[/COLOR] • [COLOR FF00FF00]{size}[/COLOR] • {bitrate} • {codec}")
         li.setLabel2(display_filename)
         li.setArt({'thumb': default_thumb, 'icon': 'DefaultAddonVideo.png'})
-
         items.append(li)
 
-    index = dialog.select(
-        "Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]",
-        items,
-        useDetails=True
+    index = dialog.select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", items, useDetails=True)
+    if index < 0:
+        return
+
+    selected_ident = sorted_details[index].get("ident")
+    play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection="movie_detail")
+
+    error_messages = {
+        "deleted": ("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO),
+        "unauthorized": ("Prístup odmietnutý", "Nemáš práva na mazanie z databázy.", xbmcgui.NOTIFICATION_ERROR),
+        "delete_error": ("Chyba", "Mazanie z databázy zlyhalo.", xbmcgui.NOTIFICATION_ERROR),
+        "not_found": ("Nenájdené", "Záznam s ident sa nenašiel.", xbmcgui.NOTIFICATION_INFO),
+        "password_protected": ("Súbor je zaheslovaný", "Nie je možné ho prehrať.", xbmcgui.NOTIFICATION_ERROR),
+        "temporarily_unavailable": ("Dočasne nedostupné", "Súbor je momentálne nedostupný.", xbmcgui.NOTIFICATION_WARNING),
+        "non_public_file": ("Súkromný súbor", "Obsah nie je verejný. Môže ísť o autorsky chránené video.", xbmcgui.NOTIFICATION_ERROR),
+        None: ("Stream URL", "Nepodarilo sa získať stream URL.", xbmcgui.NOTIFICATION_ERROR)
+    }
+
+    if play_url in error_messages:
+        title, message, icon = error_messages[play_url]
+        xbmcgui.Dialog().notification(title, message, icon)
+        return
+
+    xbmc.log(f"[Demostream] Spúšťam prehrávanie: {play_url}", xbmc.LOGINFO)
+
+    list_item = create_compatible_list_item(
+        movie_info.get("title", "Neznámy film"),
+        movie_info.get("overview", ""),
+        movie_info.get("year", 0),
+        default_thumb
     )
+    list_item.setPath(play_url)
+    xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
 
-    if index >= 0:
-        selected_ident = sorted_details[index].get("ident")
-        play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection="movie_detail")
-
-        error_messages = {
-            "deleted": ("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO),
-            "unauthorized": ("Prístup odmietnutý", "Nemáš práva na mazanie z databázy.", xbmcgui.NOTIFICATION_ERROR),
-            "delete_error": ("Chyba", "Mazanie z databázy zlyhalo.", xbmcgui.NOTIFICATION_ERROR),
-            "not_found": ("Nenájdené", "Záznam s ident sa nenašiel.", xbmcgui.NOTIFICATION_INFO),
-            "password_protected": ("Súbor je zaheslovaný", "Nie je možné ho prehrať.", xbmcgui.NOTIFICATION_ERROR),
-            "temporarily_unavailable": ("Dočasne nedostupné", "Súbor je momentálne nedostupný.", xbmcgui.NOTIFICATION_WARNING),
-            "non_public_file": ("Súkromný súbor", "Obsah nie je verejný. Môže ísť o autorsky chránené video.", xbmcgui.NOTIFICATION_ERROR),
-            None: ("Stream URL", "Nepodarilo sa získať stream URL.", xbmcgui.NOTIFICATION_ERROR)
-        }
-
-        if play_url in error_messages:
-            title, message, icon = error_messages[play_url]
-            xbmcgui.Dialog().notification(title, message, icon)
-            xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
-            return
-
-        xbmc.log(f"Prehrávam film: {movie_info.get('title', 'Neznámy film')}", xbmc.LOGDEBUG)
-
-        list_item = create_compatible_list_item(
-            movie_info.get("title", "Neznámy film"),
-            movie_info.get("overview", ""),
-            movie_info.get("year", 0),
-            default_thumb
-        )
-        
-        list_item.setPath(play_url)
-        xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
-
-        save_played_movie(movie_id)
-
-    xbmcplugin.endOfDirectory(ADDON_HANDLE)
+    # ✅ Pozor – nič nedávaj za setResolvedUrl!
+    save_played_movie(movie_id)
 
 def select_stream_serie(episodeId):
     try:
@@ -1185,28 +1219,23 @@ def select_stream_serie(episodeId):
     except ValueError:
         xbmc.log(f"episodeId nie je číslo: {episodeId}", xbmc.LOGERROR)
         xbmcgui.Dialog().notification("Chyba", "Neplatné ID epizódy.", xbmcgui.NOTIFICATION_ERROR)
-        xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
     details = mongo_api.get_items("episode_detail_links", query={"episodeId": episodeId})
     if not details:
         xbmcgui.Dialog().notification("Žiadne súbory", "Pre túto epizódu nie sú dostupné súbory.", xbmcgui.NOTIFICATION_INFO)
-        xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
     # Rozdelenie a zoradenie
     dmstrm_files = [f for f in details if "-dmstrm." in f.get("name", "").lower()]
     other_files = [f for f in details if "-dmstrm." not in f.get("name", "").lower()]
-
     def sort_key(file):
         return (
-            -resolution_order.get(file.get("resolution", ""), 0),  # Mínus pre DESCENDING
-            -float(file.get("size", "0").replace(" GB", ""))   # Mínus pre DESCENDING
+            -resolution_order.get(file.get("resolution", ""), 0),
+            -float(file.get("size", "0").replace(" GB", ""))
         )
-
     dmstrm_files.sort(key=sort_key)
     other_files.sort(key=sort_key)
-
     sorted_details = dmstrm_files + other_files
 
     episode = mongo_api.get_item("episodes", "episodeId", episodeId)
@@ -1225,20 +1254,15 @@ def select_stream_serie(episodeId):
         codec = file.get("videoCodec", "?")
         name = file.get("name", "N/A")
 
-        if "-dmstrm." in name:
-            display_filename = "[COLOR FFFF8800]Demo[/COLOR][COLOR FFFFFFFF]Stream[/COLOR]"
-        else:
-            display_filename = f"[COLOR FFFFFFFF]{name}[/COLOR]"
-        
-        li = xbmcgui.ListItem(label=f"[B]{resolution}[/B]  •  [COLOR FFFFCC00]{', '.join(audio)}[/COLOR]  •  [COLOR FF00FF00]{size}[/COLOR]  • {bitrate} • {codec}")
-        li.setLabel2(f"{display_filename}")
+        display_filename = "[COLOR FFFF8800]Demo[/COLOR][COLOR FFFFFFFF]Stream[/COLOR]" if "-dmstrm." in name.lower() else f"[COLOR FFFFFFFF]{name}[/COLOR]"
+
+        li = xbmcgui.ListItem(label=f"[B]{resolution}[/B] • [COLOR FFFFCC00]{', '.join(audio)}[/COLOR] • [COLOR FF00FF00]{size}[/COLOR] • {bitrate} • {codec}")
+        li.setLabel2(display_filename)
         li.setArt({'thumb': thumb, 'icon': 'DefaultAddonVideo.png'})
         items.append(li)
 
     index = dialog.select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", items, useDetails=True)
-
     if index < 0:
-        xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
     selected_ident = sorted_details[index].get("ident")
@@ -1258,7 +1282,6 @@ def select_stream_serie(episodeId):
     if play_url in error_messages:
         title, message, icon = error_messages[play_url]
         xbmcgui.Dialog().notification(title, message, icon)
-        xbmcplugin.endOfDirectory(ADDON_HANDLE, succeeded=False)
         return
 
     label = episode.get("name", "Epizóda") if episode else "Epizóda"
@@ -1272,13 +1295,20 @@ def select_stream_serie(episodeId):
         "plot": plot
     }
 
-    list_item = create_compatible_list_item(label, plot, year, thumb, extra_info)
+    xbmc.log(f"[Demostream] Prehrávam epizódu: {label}", xbmc.LOGINFO)
+
+    list_item = create_compatible_list_item(
+        label, 
+        plot, 
+        year, 
+        thumb, 
+        extra_info
+    )
     list_item.setPath(play_url)
     xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
 
     if serie_info:
         save_played_series(serie_info.get("serieId"))
-    xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 # CSFD typy na dnes
 def typy_na_dnes_csfd():

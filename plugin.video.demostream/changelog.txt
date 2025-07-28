@@ -1,3 +1,8 @@
+Version 1.2.4
+- Uprava pri spusteni streamu, kde bol handler na zavredie directory, co mohlo sposobovat vynimku a pad KODI
+- Uprava vytvarania listItem cez novu metodu
+- Odstranenie redis cache, koli castym padom pri citani
+
 Version 1.2.3
 - HOTFIX pre premennu, kam sa ukladal rok zo serialov a vyhadzovalo vynimku
 
