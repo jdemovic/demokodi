@@ -1,3 +1,6 @@
+Version 1.2.3
+- HOTFIX pre premennu, kam sa ukladal rok zo serialov a vyhadzovalo vynimku
+
 Version 1.2.2
 - Privatne streamy su zobrazene pri vybere ako prve
 

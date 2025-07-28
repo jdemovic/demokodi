@@ -253,8 +253,11 @@ def add_series_listitem(series, addon_handle, context_items=None):
 
     url = build_url({'action': 'list_seasons', 'serieId': serie_id})
 
-    # Formátovanie rokov
+    # Initialize variables
+    first_year = None
+    last_year = None
     year_label = ""
+
     try:
         # Pokúsime sa získať len rok (4 číslice) z dátumu, ak je to string, alebo použiť priamo int
         def extract_year(value):
