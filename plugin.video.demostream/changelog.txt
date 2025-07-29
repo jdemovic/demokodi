@@ -1,3 +1,6 @@
+Version 1.2.5
+- Odstranenie redis cache aj pre zoznamy podla pismen
+
 Version 1.2.4
 - Uprava pri spusteni streamu, kde bol handler na zavredie directory, co mohlo sposobovat vynimku a pad KODI
 - Uprava vytvarania listItem cez novu metodu

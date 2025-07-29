@@ -1343,40 +1343,43 @@ def typy_na_dnes_csfd():
 
 def get_movies_by_initial(initial, length=1):
     """Získaj filmy začínajúce na dané písmeno/znaky"""
-    cache_key = f"movies_initial_{initial}_{length}"
+    #cache_key = f"movies_initial_{initial}_{length}"
     
-    return redis_cache.get_or_cache(
-        cache_key,
-        lambda: mongo_api.get_items(
-            "movies",
-            query={"title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}, "status": 1},
-            sort={"title": 1}
-        ),
-        ttl=600 # 10 minut
+    return mongo_api.get_items(
+        "movies",
+        query={"title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}, "status": 1},
+        sort={"title": 1}
     )
 
 def get_series_by_initial(initial, length=1):
     """Získaj seriály začínajúce na dané písmeno/znaky"""
-    cache_key = f"series_initial_{initial}_{length}"
+    #cache_key = f"series_initial_{initial}_{length}"
     
-    return redis_cache.get_or_cache(
-        cache_key,
-        lambda: mongo_api.run_aggregation("series", [
-            {"$match": {
-                "title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}
-            }},
-            {"$lookup": {
-                "from": "episodes",
-                "localField": "serieId",
-                "foreignField": "serieId",
-                "as": "episodes"
-            }},
-            {"$match": {
-                "episodes.statusWS": 1
-            }},
-            {"$sort": {"title": 1}}
-        ]),
-        ttl=600  # 10 minut
+    return mongo_api.run_aggregation(
+        "series",
+        [
+            {
+                "$match": {
+                    "title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "episodes",
+                    "localField": "serieId",
+                    "foreignField": "serieId",
+                    "as": "episodes"
+                }
+            },
+            {
+                "$match": {
+                    "episodes.statusWS": 1
+                }
+            },
+            {
+                "$sort": {"title": 1}
+            }
+        ]
     )
 
 def list_movies_by_name(initial=None, length=1):
