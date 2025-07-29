@@ -1,3 +1,6 @@
+Version 1.2.8
+- hotfix koli stabilite/delay
+
 Version 1.2.7
 - zvysenie stability pluginu, pridanie delay a cistenie Player po prehravani
 

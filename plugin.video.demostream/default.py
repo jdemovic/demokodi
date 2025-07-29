@@ -1264,6 +1264,7 @@ def select_stream(movie_id):
             # Stop any existing playback
             if xbmc.Player().isPlaying():
                 xbmc.Player().stop()
+                xbmc.sleep(500)
                 
             # Small delay before playback
             xbmc.sleep(300)
@@ -1275,7 +1276,7 @@ def select_stream(movie_id):
             save_played_movie(movie_id)
             
             # Small delay after playback starts
-            xbmc.sleep(500)
+            xbmc.sleep(700)
             
         except Exception as e:
             xbmc.log(f"[Demostream] Playback failed: {str(e)}", xbmc.LOGERROR)
@@ -1283,6 +1284,7 @@ def select_stream(movie_id):
             try:
                 if xbmc.Player().isPlaying():
                     xbmc.Player().stop()
+                    xbmc.sleep(500)
             except:
                 pass
             return
@@ -1292,7 +1294,8 @@ def select_stream(movie_id):
         xbmcgui.Dialog().notification("Kritická chyba", "Došlo k neočakávanej chybe", xbmcgui.NOTIFICATION_ERROR)
     finally:
         # Cleanup
-        xbmc.executebuiltin('Dialog.Close(all,true)')
+        if xbmcgui.getCurrentWindowDialogId() != -1:
+            xbmc.executebuiltin('Dialog.Close(all,true)')
 
 def select_stream_serie(episodeId):
     try:
@@ -1456,7 +1459,7 @@ def select_stream_serie(episodeId):
                 save_played_series(serie_info.get("serieId"))
             
             # Small delay after playback starts
-            xbmc.sleep(500)
+            xbmc.sleep(700)
             
         except Exception as e:
             xbmc.log(f"[Demostream] Playback failed: {str(e)}", xbmc.LOGERROR)
@@ -1473,7 +1476,8 @@ def select_stream_serie(episodeId):
         xbmcgui.Dialog().notification("Kritická chyba", "Došlo k neočakávanej chybe", xbmcgui.NOTIFICATION_ERROR)
     finally:
         # Cleanup
-        xbmc.executebuiltin('Dialog.Close(all,true)')
+        if xbmcgui.getCurrentWindowDialogId() != -1:
+            xbmc.executebuiltin('Dialog.Close(all,true)')
 
 # CSFD typy na dnes
 def typy_na_dnes_csfd():
