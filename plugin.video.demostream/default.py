@@ -12,6 +12,7 @@ import re
 import hashlib
 from datetime import datetime, timedelta
 from md5crypt import md5crypt
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
 
 addon_dir = os.path.dirname(__file__)
@@ -1316,21 +1317,30 @@ def typy_na_dnes_csfd():
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
     def fetch_csfd_tips():
+        # Najprv získať len základné dáta z ČSFD
         results = fetch_csfd_tip_titles()
         if not results or (isinstance(results, dict) and results.get("error")):
             return []
 
+        # Cache jednotlivých filmov
         movies = []
         for item in results:
-            movie = mongo_api.get_item("movies", "title", item["title"], query={"year": item["year"]})
+            cache_key = f"movie:{item['title']}:{item['year']}"
+            movie = redis_cache.get_or_cache(
+                cache_key,
+                lambda: mongo_api.get_item("movies", "title", item["title"], query={"year": item["year"]}),
+                ttl=86400  # 1 deň pre jednotlivé filmy
+            )
+            
             if movie and movie.get("status") == 1:
                 movies.append(movie)
         return movies
 
+    # Cache pre celý zoznam tipov
     movies = redis_cache.get_or_cache(
-        "csfd_tips_full",
+        "csfd_tips_list",
         fetch_csfd_tips,
-        ttl=21600  # 6 hodín
+        ttl=21600  # 6 hodín pre celý zoznam
     )
 
     if not movies:
@@ -1340,47 +1350,6 @@ def typy_na_dnes_csfd():
             add_movie_listitem(movie, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
-
-def get_movies_by_initial(initial, length=1):
-    """Získaj filmy začínajúce na dané písmeno/znaky"""
-    #cache_key = f"movies_initial_{initial}_{length}"
-    
-    return mongo_api.get_items(
-        "movies",
-        query={"title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}, "status": 1},
-        sort={"title": 1}
-    )
-
-def get_series_by_initial(initial, length=1):
-    """Získaj seriály začínajúce na dané písmeno/znaky"""
-    #cache_key = f"series_initial_{initial}_{length}"
-    
-    return mongo_api.run_aggregation(
-        "series",
-        [
-            {
-                "$match": {
-                    "title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}
-                }
-            },
-            {
-                "$lookup": {
-                    "from": "episodes",
-                    "localField": "serieId",
-                    "foreignField": "serieId",
-                    "as": "episodes"
-                }
-            },
-            {
-                "$match": {
-                    "episodes.statusWS": 1
-                }
-            },
-            {
-                "$sort": {"title": 1}
-            }
-        ]
-    )
 
 def list_movies_by_name(initial=None, length=1):
     """Zobraziť filmy podľa názvu (písmená, dvojice, trojice, zoznam)"""
@@ -1394,43 +1363,44 @@ def list_movies_by_name(initial=None, length=1):
     xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
     
     if initial is None:
-        # Zobraziť písmená A-Z a 0-9
-        letters = [chr(i) for i in range(65, 91)]  # A-Z
-        letters.extend([str(i) for i in range(10)])  # 0-9
+        # Cache pre písmená A-Z a 0-9
+        letters_data = redis_cache.get_or_cache(
+            "movies_initials_summary",
+            lambda: get_initials_summary(),
+            ttl=86400  # 24 hodín
+        )
         
-        for letter in letters:
-            movies = get_movies_by_initial(letter)
-            count = len(movies)
+        for letter, count in letters_data.items():
             if count > 0:
                 url = build_url({'action': 'list_movies_by_name', 'initial': letter, 'length': 1})
                 li = xbmcgui.ListItem(label=f'{letter} ({count})')
                 xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
     
     elif length == 1:
-        # Zobraziť dvojice písmen pre zvolené písmeno
-        movies = get_movies_by_initial(initial)
-        first_two_chars = sorted(list(set(movie['title'][:2].upper() for movie in movies if len(movie['title']) >= 2)))
+        # Cache pre dvojice písmen
+        two_chars_data = redis_cache.get_or_cache(
+            f"movies_two_chars_{initial}",
+            lambda: get_two_chars_combinations(initial),
+            ttl=86400  # 24 hodín
+        )
         
-        for two_chars in first_two_chars:
-            if two_chars.startswith(initial.upper()):
-                count = len([m for m in movies if m['title'].upper().startswith(two_chars)])
-                if count > 0:
-                    url = build_url({'action': 'list_movies_by_name', 'initial': two_chars, 'length': 2})
-                    li = xbmcgui.ListItem(label=f'{two_chars} ({count})')
-                    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+        for two_chars, count in two_chars_data.items():
+            url = build_url({'action': 'list_movies_by_name', 'initial': two_chars, 'length': 2})
+            li = xbmcgui.ListItem(label=f'{two_chars} ({count})')
+            xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
     
     elif length == 2:
-        # Zobraziť trojice písmen pre zvolenú dvojicu
-        movies = get_movies_by_initial(initial)
-        first_three_chars = sorted(list(set(movie['title'][:3].upper() for movie in movies if len(movie['title']) >= 3)))
+        # Cache pre trojice písmen
+        three_chars_data = redis_cache.get_or_cache(
+            f"movies_three_chars_{initial}",
+            lambda: get_three_chars_combinations(initial),
+            ttl=86400  # 24 hodín
+        )
         
-        for three_chars in first_three_chars:
-            if three_chars.startswith(initial.upper()):
-                count = len([m for m in movies if m['title'].upper().startswith(three_chars)])
-                if count > 0:
-                    url = build_url({'action': 'list_movies_by_name', 'initial': three_chars, 'length': 3})
-                    li = xbmcgui.ListItem(label=f'{three_chars} ({count})')
-                    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+        for three_chars, count in three_chars_data.items():
+            url = build_url({'action': 'list_movies_by_name', 'initial': three_chars, 'length': 3})
+            li = xbmcgui.ListItem(label=f'{three_chars} ({count})')
+            xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
     
     else:
         # Zobraziť filmy pre zvolenú trojicu písmen
@@ -1439,6 +1409,79 @@ def list_movies_by_name(initial=None, length=1):
             add_movie_listitem(movie, ADDON_HANDLE)
     
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
+
+def get_initials_summary():
+    """Získaj súhrn počtov filmov pre každé písmeno pomocou agregácie"""
+    pipeline = [
+        {"$match": {"status": 1}},
+        {"$project": {
+            "first_char": {"$substrCP": [{"$toUpper": "$title"}, 0, 1]}
+        }},
+        {"$match": {
+            "first_char": {"$regex": "^[A-Z0-9]$"}
+        }},
+        {"$group": {
+            "_id": "$first_char",
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"_id": 1}}
+    ]
+    
+    result = {}
+    try:
+        items = mongo_api.run_aggregation("movies", pipeline)
+        for item in items:
+            result[item["_id"]] = item["count"]
+    except Exception as e:
+        xbmc.log(f"Chyba pri získavaní súhrnu iniciál: {str(e)}", xbmc.LOGERROR)
+        # Fallback - ručné získanie pre každé písmeno
+        letters = [chr(i) for i in range(65, 91)] + [str(i) for i in range(10)]
+        for letter in letters:
+            movies = get_movies_by_initial(letter)
+            count = len(movies)
+            if count > 0:
+                result[letter] = count
+    
+    return result
+
+def get_two_chars_combinations(initial):
+    """Získaj kombinácie prvých dvoch písmen a ich počty"""
+    movies = get_movies_by_initial(initial)
+    two_chars = {}
+    
+    for movie in movies:
+        first_two = movie['title'][:2].upper()
+        two_chars[first_two] = two_chars.get(first_two, 0) + 1
+    
+    return two_chars
+
+def get_three_chars_combinations(initial):
+    """Získaj kombinácie prvých troch písmen a ich počty"""
+    movies = get_movies_by_initial(initial)
+    three_chars = {}
+    
+    for movie in movies:
+        first_three = movie['title'][:3].upper()
+        three_chars[first_three] = three_chars.get(first_three, 0) + 1
+    
+    return three_chars
+
+def get_movies_by_initial(initial, length=1):
+    """Získaj filmy začínajúce na dané písmeno/znaky"""
+    cache_key = f"movies_initial_{initial}_{length}"
+    
+    return redis_cache.get_or_cache(
+        cache_key,
+        lambda: mongo_api.get_items(
+            "movies",
+            query={
+                "title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}, 
+                "status": 1
+            },
+            sort={"title": 1}
+        ),
+        ttl=3600  # 1 hodina
+    )
 
 def list_series_by_name(initial=None, length=1):
     """Zobraziť seriály podľa názvu (písmená, dvojice, trojice, zoznam)"""
@@ -1452,43 +1495,45 @@ def list_series_by_name(initial=None, length=1):
     xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
     
     if initial is None:
-        # Zobraziť písmená A-Z a 0-9
-        letters = [chr(i) for i in range(65, 91)]  # A-Z
-        letters.extend([str(i) for i in range(10)])  # 0-9
+        # Cache pre písmená A-Z a 0-9
+        letters_data = redis_cache.get_or_cache(
+            "series_initials_summary",
+            lambda: get_series_initials_summary(),
+            ttl=3600  # 24 hodín
+        )
         
-        for letter in letters:
-            series = get_series_by_initial(letter)
-            count = len(series)
+        for letter, count in letters_data.items():
             if count > 0:
                 url = build_url({'action': 'list_series_by_name', 'initial': letter, 'length': 1})
                 li = xbmcgui.ListItem(label=f'{letter} ({count})')
                 xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
     
     elif length == 1:
-        # Zobraziť dvojice písmen pre zvolené písmeno
-        series = get_series_by_initial(initial)
-        first_two_chars = sorted(list(set(s['title'][:2].upper() for s in series if len(s['title']) >= 2)))
+        # Cache pre dvojice písmen
+        two_chars_data = redis_cache.get_or_cache(
+            f"series_two_chars_{initial}",
+            lambda: get_series_two_chars_combinations(initial),
+            ttl=3600  # 24 hodín
+        )
         
-        for two_chars in first_two_chars:
-            if two_chars.startswith(initial.upper()):
-                count = len([s for s in series if s['title'].upper().startswith(two_chars)])
-                if count > 0:
-                    url = build_url({'action': 'list_series_by_name', 'initial': two_chars, 'length': 2})
-                    li = xbmcgui.ListItem(label=f'{two_chars} ({count})')
-                    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+        for two_chars, count in two_chars_data.items():
+            url = build_url({'action': 'list_series_by_name', 'initial': two_chars, 'length': 2})
+            li = xbmcgui.ListItem(label=f'{two_chars} ({count})')
+            xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
     
     elif length == 2:
-        # Zobraziť trojice písmen pre zvolenú dvojicu
-        series = get_series_by_initial(initial)
-        first_three_chars = sorted(list(set(s['title'][:3].upper() for s in series if len(s['title']) >= 3)))
+        # Cache pre trojice písmen
+        three_chars_data = redis_cache.get_or_cache(
+            f"series_three_chars_{initial}",
+            lambda: get_series_three_chars_combinations(initial),
+            ttl=3600  # 24 hodín
+        )
         
-        for three_chars in first_three_chars:
-            if three_chars.startswith(initial.upper()):
-                count = len([s for s in series if s['title'].upper().startswith(three_chars)])
-                if count > 0:
-                    url = build_url({'action': 'list_series_by_name', 'initial': three_chars, 'length': 3})
-                    li = xbmcgui.ListItem(label=f'{three_chars} ({count})')
-                    xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
+        for three_chars, count in three_chars_data.items():
+            if three_chars.startswith(initial.upper()):  # Pridaná kontrola
+                url = build_url({'action': 'list_series_by_name', 'initial': three_chars, 'length': 3})
+                li = xbmcgui.ListItem(label=f'{three_chars} ({count})')
+                xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
     
     else:
         # Zobraziť seriály pre zvolenú trojicu písmen
@@ -1497,6 +1542,67 @@ def list_series_by_name(initial=None, length=1):
             add_series_listitem(s, ADDON_HANDLE)
     
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
+
+def get_series_initials_summary():
+    """Získaj súhrn počtov seriálov pre každé písmeno"""
+    letters = [chr(i) for i in range(65, 91)] + [str(i) for i in range(10)]
+    result = {}
+    
+    for letter in letters:
+        # Použijeme existujúcu funkciu get_series_by_initial s limitom 1
+        series = get_series_by_initial(letter, length=1)
+        count = len(series) if series else 0
+        if count > 0:
+            result[letter] = count
+    
+    return result
+
+def get_series_two_chars_combinations(initial):
+    """Získaj kombinácie prvých dvoch písmen a ich počty pre seriály"""
+    series = get_series_by_initial(initial)
+    two_chars = {}
+    
+    for s in series:
+        first_two = s['title'][:2].upper()
+        two_chars[first_two] = two_chars.get(first_two, 0) + 1
+    
+    return two_chars
+
+def get_series_three_chars_combinations(initial):
+    """Získaj kombinácie prvých troch písmen a ich počty pre seriály"""
+    series = get_series_by_initial(initial)
+    three_chars = {}
+    
+    for s in series:
+        if len(s['title']) >= 3:  # Pridaná kontrola dĺžky názvu
+            first_three = s['title'][:3].upper()
+            three_chars[first_three] = three_chars.get(first_three, 0) + 1
+    
+    return three_chars
+
+def get_series_by_initial(initial, length=1):
+    """Získaj seriály začínajúce na dané písmeno/znaky"""
+    cache_key = f"series_initial_{initial}_{length}"
+    
+    return redis_cache.get_or_cache(
+        cache_key,
+        lambda: mongo_api.run_aggregation("series", [
+            {"$match": {
+                "title": {"$regex": f'^{re.escape(initial)}', "$options": "i"}
+            }},
+            {"$lookup": {
+                "from": "episodes",
+                "localField": "serieId",
+                "foreignField": "serieId",
+                "as": "episodes"
+            }},
+            {"$match": {
+                "episodes.statusWS": 1
+            }},
+            {"$sort": {"title": 1}}
+        ]),
+        ttl=3600  # 1h
+    )
 
 def show_latest_dubbed_movies():
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Novinky dabované')
@@ -1540,70 +1646,122 @@ def list_top_popular_movies_czsk():
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Top 100 populárnych filmov (CZ/SK)')
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
-    def fetch_tmdb_popular_ids():
-        popular_ids = []
+    def fetch_popular_movies():
+        # 1. Získanie populárnych ID z TMDB
         api_key = addon.getSetting("tmdb_api_key")
+        popular_ids = []
+        
+        # Paralelné načítanie stránok
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = []
+            for page in range(1, 6):
+                url = f"https://api.themoviedb.org/3/movie/popular?api_key={api_key}&language=cs-CZ&region=CZ&page={page}"
+                futures.append(executor.submit(fetch_tmdb_page, url))
+            
+            for future in as_completed(futures):
+                try:
+                    data = future.result()
+                    popular_ids.extend(item["id"] for item in data.get("results", []))
+                except Exception as e:
+                    xbmc.log(f"Chyba pri načítaní stránky: {e}", xbmc.LOGWARNING)
 
-        for page in range(1, 6):
-            url = f"https://api.themoviedb.org/3/movie/popular?api_key={api_key}&language=cs-CZ&region=CZ&page={page}"
-            try:
-                with urllib.request.urlopen(url, timeout=10) as response:
-                    data = json.loads(response.read().decode('utf-8'))
-                    for item in data.get("results", []):
-                        popular_ids.append(item["id"])
-            except Exception as e:
-                xbmc.log(f"Chyba pri načítaní populárnych filmov z TMDb: {e}", xbmc.LOGWARNING)
+        # 2. Hromadné načítanie filmov z MongoDB
+        if not popular_ids:
+            return []
+            
+        query = {
+            "tmdbId": {"$in": popular_ids[:100]},  # Obmedzenie na prvých 100 ID
+            "status": 1
+        }
+        
+        movies = list(mongo_api.get_items(
+            "movies",
+            query=query,
+            sort={"popularity": -1},  # Zoradenie podľa popularity
+            limit=100
+        ))
+        
+        return movies
 
-        return popular_ids
+    # Cache celej funkcie s výslednými filmami
+    movies = redis_cache.get_or_cache(
+        "tmdb_popular_czsk_movies_full",
+        fetch_popular_movies,
+        ttl=21600  # 6 hodín
+    )
 
-    tmdb_ids = redis_cache.get_or_cache("tmdb_popular_czsk_ids", fetch_tmdb_popular_ids, ttl=21600)
-
-    found_movies = []
-    for tmdb_id in tmdb_ids:
-        movie = mongo_api.get_item("movies", "tmdbId", tmdb_id)
-        if movie and movie.get("status") == 1:
-            found_movies.append(movie)
-        if len(found_movies) >= 100:
-            break
-
-    for movie in found_movies:
-        add_movie_listitem(movie, ADDON_HANDLE)
+    if not movies:
+        xbmcgui.Dialog().notification("Chyba", "Nenašli sa žiadne filmy", xbmcgui.NOTIFICATION_WARNING)
+    else:
+        for movie in movies:
+            add_movie_listitem(movie, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
+
+def fetch_tmdb_page(url):
+    with urllib.request.urlopen(url, timeout=10) as response:
+        return json.loads(response.read().decode('utf-8'))
 
 def list_trending_movies_last_14_days():
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Trending filmy (posledných 14 dní)')
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
-    def fetch_trending_ids():
-        trending_ids = set()
+    def fetch_trending_movies():
         api_key = addon.getSetting("tmdb_api_key")
-
-        for period in ['day', 'week']:
-            for i in range(1, 3):
-                url = f"https://api.themoviedb.org/3/trending/movie/{period}?api_key={api_key}&page={i}"
+        trending_ids = set()
+        
+        # Paralelné načítanie trendov pre day/week
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = []
+            
+            # 2 stránky pre denné trendy (day)
+            for page in range(1, 3):
+                url = f"https://api.themoviedb.org/3/trending/movie/day?api_key={api_key}&page={page}"
+                futures.append(executor.submit(fetch_tmdb_page, url))
+            
+            # 2 stránky pre týždenné trendy (week)
+            for page in range(1, 3):
+                url = f"https://api.themoviedb.org/3/trending/movie/week?api_key={api_key}&page={page}"
+                futures.append(executor.submit(fetch_tmdb_page, url))
+            
+            for future in as_completed(futures):
                 try:
-                    with urllib.request.urlopen(url, timeout=10) as response:
-                        data = json.loads(response.read().decode('utf-8'))
-                        for item in data.get("results", []):
-                            trending_ids.add(item["id"])
+                    data = future.result()
+                    for item in data.get("results", []):
+                        trending_ids.add(item["id"])
                 except Exception as e:
-                    xbc.log(f"Chyba pri načítaní trending filmov ({period}): {e}", xbc.LOGWARNING)
+                    xbmc.log(f"Chyba pri načítaní trendov: {e}", xbmc.LOGWARNING)
 
-        return list(trending_ids)
+        trending_ids = list(trending_ids)
+        if not trending_ids:
+            return []
 
-    tmdb_ids = redis_cache.get_or_cache("tmdb_trending_14days", fetch_trending_ids, ttl=21600)
+        # Hromadný dotaz do MongoDB
+        movies = list(mongo_api.get_items(
+            "movies",
+            query={
+                "tmdbId": {"$in": trending_ids[:200]},  # Bezpečný limit
+                "status": 1
+            },
+            limit=100
+        ))
 
-    found_movies = []
-    for tmdb_id in tmdb_ids:
-        movie = mongo_api.get_item("movies", "tmdbId", tmdb_id)
-        if movie and movie.get("status") == 1:
-            found_movies.append(movie)
-        if len(found_movies) >= 100:
-            break
+        # Zachovanie popularity trendingu
+        movie_dict = {m["tmdbId"]: m for m in movies}
+        return [movie_dict[id] for id in trending_ids if id in movie_dict][:100]
 
-    for movie in found_movies:
-        add_movie_listitem(movie, ADDON_HANDLE)
+    # Cache celej funkcie s výslednými filmami
+    movies = redis_cache.get_or_cache(
+        "tmdb_trending_14days_full",
+        fetch_trending_movies,
+        ttl=10800  # 3 hodiny - trending sa mení častejšie
+    )
+
+    if not movies:
+        xbmcgui.Dialog().notification("Chyba", "Nenašli sa žiadne trending filmy", xbmcgui.NOTIFICATION_WARNING)
+    else:
+        for movie in movies:
+            add_movie_listitem(movie, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
     
@@ -1611,34 +1769,53 @@ def list_top_rated_movies_czsk():
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Top 100 najlepšie hodnotených filmov (CZ/SK)')
     xbmcplugin.setContent(ADDON_HANDLE, 'movies')
 
-    def fetch_top_rated_ids():
-        top_rated_ids = []
+    def fetch_top_rated_movies():
         api_key = addon.getSetting("tmdb_api_key")
+        top_rated_ids = []
+        
+        # Načítanie IDčiek (paralelne)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(
+                fetch_tmdb_page,
+                f"https://api.themoviedb.org/3/movie/top_rated?api_key={api_key}&language=cs-CZ&region=CZ&page={page}"
+            ) for page in range(1, 6)]
+            
+            for future in as_completed(futures):
+                try:
+                    data = future.result()
+                    top_rated_ids.extend(item["id"] for item in data.get("results", []))
+                except Exception as e:
+                    xbmc.log(f"Chyba pri načítaní: {e}", xbmc.LOGWARNING)
 
-        for page in range(1, 6):
-            url = f"https://api.themoviedb.org/3/movie/top_rated?api_key={api_key}&language=cs-CZ&region=CZ&page={page}"
-            try:
-                with request.urlopen(url, timeout=10) as response:
-                    data = json.loads(response.read().decode('utf-8'))
-                    for item in data.get("results", []):
-                        top_rated_ids.append(item["id"])
-            except Exception as e:
-                xbmc.log(f"Chyba pri načítaní top rated filmov z TMDb: {e}", xbmc.LOGWARNING)
+        if not top_rated_ids:
+            return []
 
-        return top_rated_ids
+        # Hromadný dotaz bez sortu
+        movies = list(mongo_api.get_items(
+            "movies",
+            query={
+                "tmdbId": {"$in": top_rated_ids[:100]},
+                "status": 1
+            },
+            limit=100
+        ))
 
-    tmdb_ids = redis_cache.get_or_cache("tmdb_top_rated_czsk_ids", fetch_top_rated_ids, ttl=21600)
+        # Jednoduché zoradenie podľa TMDB poradia
+        movies.sort(key=lambda m: top_rated_ids.index(m["tmdbId"]))
+        return movies[:100]
 
-    found_movies = []
-    for tmdb_id in tmdb_ids:
-        movie = mongo_api.get_item("movies", "tmdbId", tmdb_id)
-        if movie and movie.get("status") == 1:
-            found_movies.append(movie)
-        if len(found_movies) >= 100:
-            break
+    # Cache s 6-hodinovou expiráciou
+    movies = redis_cache.get_or_cache(
+        "tmdb_top_rated_czsk_movies_full", 
+        fetch_top_rated_movies,
+        ttl=21600
+    )
 
-    for movie in found_movies:
-        add_movie_listitem(movie, ADDON_HANDLE)
+    if not movies:
+        xbmcgui.Dialog().notification("Chyba", "Nenašli sa žiadne filmy", xbmcgui.NOTIFICATION_WARNING)
+    else:
+        for movie in movies:
+            add_movie_listitem(movie, ADDON_HANDLE)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
