@@ -1133,183 +1133,347 @@ def set_video_info_tag(li, info):
 
 def select_stream(movie_id):
     try:
-        movie_id = int(movie_id)
-    except ValueError:
-        xbmc.log(f"movie_id nie je číslo: {movie_id}", xbmc.LOGERROR)
-        xbmcgui.Dialog().notification("Chyba", "Neplatné ID filmu.", xbmcgui.NOTIFICATION_ERROR)
-        return
+        # Validate input
+        try:
+            movie_id = int(movie_id)
+        except (ValueError, TypeError):
+            xbmc.log(f"[Demostream] Invalid movie_id: {movie_id}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Neplatné ID filmu", xbmcgui.NOTIFICATION_ERROR)
+            return
 
-    details = mongo_api.get_items("movie_detail", query={"fkMovieId": movie_id})
-    if not details:
-        xbmcgui.Dialog().notification("Žiadne súbory", "Pre tento film nie sú dostupné žiadne súbory.", xbmcgui.NOTIFICATION_INFO)
-        return
+        # Disable hardware acceleration to prevent crashes
+        #xbmc.executebuiltin('SetSetting(video.accel.method,0)')
+        #xbmc.sleep(200)  # Allow settings to apply
 
-    # Rozdelenie a zoradenie
-    dmstrm_files = [f for f in details if "-dmstrm." in f.get("name", "").lower()]
-    other_files = [f for f in details if "-dmstrm." not in f.get("name", "").lower()]
-    def sort_key(file):
-        return (
-            -resolution_order.get(file.get("resolution", ""), 0),
-            -float(file.get("size", "0").replace(" GB", ""))
-        )
-    dmstrm_files.sort(key=sort_key)
-    other_files.sort(key=sort_key)
-    sorted_details = dmstrm_files + other_files
+        # Get movie details with error handling
+        try:
+            movie_info = mongo_api.get_item("movies", "movieId", movie_id)
+            if not movie_info:
+                raise ValueError("Movie not found in database")
+        except Exception as e:
+            xbmc.log(f"[Demostream] Database error: {str(e)}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Nepodarilo sa načítať informácie o filme", xbmcgui.NOTIFICATION_ERROR)
+            return
 
-    movie_info = mongo_api.get_item("movies", "movieId", movie_id)
-    default_thumb = movie_info.get('posterUrl', 'DefaultAddonVideo.png') if movie_info else 'DefaultAddonVideo.png'
+        # Get available streams with error handling
+        try:
+            details = list(mongo_api.get_items("movie_detail", query={"fkMovieId": movie_id}))
+            if not details:
+                xbmcgui.Dialog().notification("Info", "Pre tento film nie sú dostupné žiadne streamy", xbmcgui.NOTIFICATION_INFO)
+                return
+        except Exception as e:
+            xbmc.log(f"[Demostream] Stream query failed: {str(e)}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Chyba pri načítaní streamov", xbmcgui.NOTIFICATION_ERROR)
+            return
 
-    dialog = xbmcgui.Dialog()
-    items = []
+        # Sort streams
+        try:
+            dmstrm_files = [f for f in details if "-dmstrm." in f.get("name", "").lower()]
+            other_files = [f for f in details if "-dmstrm." not in f.get("name", "").lower()]
+            
+            def sort_key(file):
+                return (
+                    -resolution_order.get(file.get("resolution", ""), 0),
+                    -float(file.get("size", "0").replace(" GB", ""))
+                )
+            
+            dmstrm_files.sort(key=sort_key)
+            other_files.sort(key=sort_key)
+            sorted_details = dmstrm_files + other_files
+        except Exception as e:
+            xbmc.log(f"[Demostream] Sorting failed: {str(e)}", xbmc.LOGWARNING)
+            sorted_details = details  # Fallback to unsorted list
 
-    for file in sorted_details:
-        audio = file.get("audio", ["Neznámy"])
-        resolution = file.get("resolution", "N/A")
-        size = file.get("size", "N/A")
-        bitrate = file.get("bitrate", "N/A")
-        codec = file.get("videoCodec", "N/A")
-        filename = file.get("name", "N/A")
+        # Create selection dialog
+        dialog_items = []
+        try:
+            default_thumb = movie_info.get('posterUrl', 'DefaultAddonVideo.png')
+            for file in sorted_details:
+                try:
+                    audio = file.get("audio", ["Neznámy"])
+                    resolution = file.get("resolution", "N/A")
+                    size = file.get("size", "N/A")
+                    bitrate = file.get("bitrate", "N/A")
+                    codec = file.get("videoCodec", "N/A")
+                    filename = file.get("name", "N/A")
 
-        display_filename = "[COLOR FFFF8800]Demo[/COLOR][COLOR FFFFFFFF]Stream[/COLOR]" if "-dmstrm." in filename.lower() else f"[COLOR FFFFFFFF]{filename}[/COLOR]"
+                    display_filename = "[COLOR FFFF8800]Demo[/COLOR][COLOR FFFFFFFF]Stream[/COLOR]" if "-dmstrm." in filename.lower() else f"[COLOR FFFFFFFF]{filename}[/COLOR]"
 
-        li = xbmcgui.ListItem(label=f"[B]{resolution}[/B] • [COLOR FFFFCC00]{', '.join(audio)}[/COLOR] • [COLOR FF00FF00]{size}[/COLOR] • {bitrate} • {codec}")
-        li.setLabel2(display_filename)
-        li.setArt({'thumb': default_thumb, 'icon': 'DefaultAddonVideo.png'})
-        items.append(li)
+                    li = xbmcgui.ListItem(label=f"[B]{resolution}[/B] • [COLOR FFFFCC00]{', '.join(audio)}[/COLOR] • [COLOR FF00FF00]{size}[/COLOR] • {bitrate} • {codec}")
+                    li.setLabel2(display_filename)
+                    li.setArt({'thumb': default_thumb, 'icon': 'DefaultAddonVideo.png'})
+                    dialog_items.append(li)
+                except Exception as e:
+                    xbmc.log(f"[Demostream] Error creating listitem: {str(e)}", xbmc.LOGWARNING)
+                    continue
+        except Exception as e:
+            xbmc.log(f"[Demostream] Dialog creation failed: {str(e)}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Chyba pri vytváraní výberu", xbmcgui.NOTIFICATION_ERROR)
+            return
 
-    index = dialog.select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", items, useDetails=True)
-    if index < 0:
-        return
+        # Show selection dialog
+        try:
+            dialog = xbmcgui.Dialog()
+            index = dialog.select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", dialog_items, useDetails=True)
+            if index < 0:
+                return  # User cancelled
+        except Exception as e:
+            xbmc.log(f"[Demostream] Dialog selection failed: {str(e)}", xbmc.LOGERROR)
+            return
 
-    selected_ident = sorted_details[index].get("ident")
-    play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection="movie_detail")
+        # Get selected stream URL
+        try:
+            selected_ident = sorted_details[index].get("ident")
+            if not selected_ident:
+                raise ValueError("Invalid stream ident")
+                
+            play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection="movie_detail")
+            
+            error_messages = {
+                "deleted": ("Vymazané", "Súbor bol vymazaný", xbmcgui.NOTIFICATION_INFO),
+                "unauthorized": ("Chyba", "Nemáte oprávnenie", xbmcgui.NOTIFICATION_ERROR),
+                "not_found": ("Chyba", "Súbor neexistuje", xbmcgui.NOTIFICATION_ERROR),
+                "password_protected": ("Chyba", "Súbor je zaheslovaný", xbmcgui.NOTIFICATION_ERROR),
+                None: ("Chyba", "Nepodarilo sa získať stream", xbmcgui.NOTIFICATION_ERROR)
+            }
 
-    error_messages = {
-        "deleted": ("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO),
-        "unauthorized": ("Prístup odmietnutý", "Nemáš práva na mazanie z databázy.", xbmcgui.NOTIFICATION_ERROR),
-        "delete_error": ("Chyba", "Mazanie z databázy zlyhalo.", xbmcgui.NOTIFICATION_ERROR),
-        "not_found": ("Nenájdené", "Záznam s ident sa nenašiel.", xbmcgui.NOTIFICATION_INFO),
-        "password_protected": ("Súbor je zaheslovaný", "Nie je možné ho prehrať.", xbmcgui.NOTIFICATION_ERROR),
-        "temporarily_unavailable": ("Dočasne nedostupné", "Súbor je momentálne nedostupný.", xbmcgui.NOTIFICATION_WARNING),
-        "non_public_file": ("Súkromný súbor", "Obsah nie je verejný. Môže ísť o autorsky chránené video.", xbmcgui.NOTIFICATION_ERROR),
-        None: ("Stream URL", "Nepodarilo sa získať stream URL.", xbmcgui.NOTIFICATION_ERROR)
-    }
+            if play_url in error_messages:
+                title, msg, icon = error_messages[play_url]
+                xbmcgui.Dialog().notification(title, msg, icon)
+                return
+        except Exception as e:
+            xbmc.log(f"[Demostream] Stream URL fetch failed: {str(e)}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Chyba pri získavaní streamu", xbmcgui.NOTIFICATION_ERROR)
+            return
 
-    if play_url in error_messages:
-        title, message, icon = error_messages[play_url]
-        xbmcgui.Dialog().notification(title, message, icon)
-        return
+        # Play the stream with full error handling
+        try:
+            # Create list item with metadata
+            list_item = create_compatible_list_item(
+                movie_info.get("title", "Neznámy film"),
+                movie_info.get("overview", ""),
+                movie_info.get("year", 0),
+                default_thumb,
+                {
+                    "genre": ", ".join([get_genre_dict().get(str(gid), "") for gid in movie_info.get("genres", [])]),
+                    "rating": float(movie_info.get("vote_average", 0)) if movie_info.get("vote_average") else None
+                }
+            )
+            list_item.setPath(play_url)
+            
+            # Stop any existing playback
+            if xbmc.Player().isPlaying():
+                xbmc.Player().stop()
+                
+            # Small delay before playback
+            xbmc.sleep(300)
+            
+            # Set resolved URL
+            xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
+            
+            # Save to history
+            save_played_movie(movie_id)
+            
+            # Small delay after playback starts
+            xbmc.sleep(500)
+            
+        except Exception as e:
+            xbmc.log(f"[Demostream] Playback failed: {str(e)}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Chyba pri spustení prehrávania", xbmcgui.NOTIFICATION_ERROR)
+            try:
+                if xbmc.Player().isPlaying():
+                    xbmc.Player().stop()
+            except:
+                pass
+            return
 
-    xbmc.log(f"[Demostream] Spúšťam prehrávanie: {play_url}", xbmc.LOGINFO)
-
-    list_item = create_compatible_list_item(
-        movie_info.get("title", "Neznámy film"),
-        movie_info.get("overview", ""),
-        movie_info.get("year", 0),
-        default_thumb
-    )
-    list_item.setPath(play_url)
-    xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
-
-    # ✅ Pozor – nič nedávaj za setResolvedUrl!
-    save_played_movie(movie_id)
+    except Exception as e:
+        xbmc.log(f"[Demostream] FATAL ERROR in select_stream: {str(e)}", xbmc.LOGERROR)
+        xbmcgui.Dialog().notification("Kritická chyba", "Došlo k neočakávanej chybe", xbmcgui.NOTIFICATION_ERROR)
+    finally:
+        # Cleanup
+        xbmc.executebuiltin('Dialog.Close(all,true)')
 
 def select_stream_serie(episodeId):
     try:
-        episodeId = int(episodeId)
-    except ValueError:
-        xbmc.log(f"episodeId nie je číslo: {episodeId}", xbmc.LOGERROR)
-        xbmcgui.Dialog().notification("Chyba", "Neplatné ID epizódy.", xbmcgui.NOTIFICATION_ERROR)
-        return
+        # Validate input
+        try:
+            episodeId = int(episodeId)
+        except (ValueError, TypeError):
+            xbmc.log(f"[Demostream] Invalid episodeId: {episodeId}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Neplatné ID epizódy", xbmcgui.NOTIFICATION_ERROR)
+            return
 
-    details = mongo_api.get_items("episode_detail_links", query={"episodeId": episodeId})
-    if not details:
-        xbmcgui.Dialog().notification("Žiadne súbory", "Pre túto epizódu nie sú dostupné súbory.", xbmcgui.NOTIFICATION_INFO)
-        return
+        # Disable hardware acceleration
+        #xbmc.executebuiltin('SetSetting(video.accel.method,0)')
+        #xbmc.sleep(200)
 
-    # Rozdelenie a zoradenie
-    dmstrm_files = [f for f in details if "-dmstrm." in f.get("name", "").lower()]
-    other_files = [f for f in details if "-dmstrm." not in f.get("name", "").lower()]
-    def sort_key(file):
-        return (
-            -resolution_order.get(file.get("resolution", ""), 0),
-            -float(file.get("size", "0").replace(" GB", ""))
-        )
-    dmstrm_files.sort(key=sort_key)
-    other_files.sort(key=sort_key)
-    sorted_details = dmstrm_files + other_files
+        # Get episode details with error handling
+        try:
+            details = list(mongo_api.get_items("episode_detail_links", query={"episodeId": episodeId}))
+            if not details:
+                xbmcgui.Dialog().notification("Info", "Pre túto epizódu nie sú dostupné streamy", xbmcgui.NOTIFICATION_INFO)
+                return
+        except Exception as e:
+            xbmc.log(f"[Demostream] Episode query failed: {str(e)}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Chyba pri načítaní epizódy", xbmcgui.NOTIFICATION_ERROR)
+            return
 
-    episode = mongo_api.get_item("episodes", "episodeId", episodeId)
-    serie_info = mongo_api.get_item("series", "serieId", episode.get("serieId")) if episode else None
-    season = mongo_api.get_item("seasons", "seasonId", episode.get("seasonId")) if episode else None
-    thumb = episode.get("stillUrl") or (serie_info.get("posterUrl", "DefaultAddonVideo.png") if serie_info else "DefaultAddonVideo.png")
+        # Sort streams
+        try:
+            dmstrm_files = [f for f in details if "-dmstrm." in f.get("name", "").lower()]
+            other_files = [f for f in details if "-dmstrm." not in f.get("name", "").lower()]
+            
+            def sort_key(file):
+                return (
+                    -resolution_order.get(file.get("resolution", ""), 0),
+                    -float(file.get("size", "0").replace(" GB", ""))
+                )
+            
+            dmstrm_files.sort(key=sort_key)
+            other_files.sort(key=sort_key)
+            sorted_details = dmstrm_files + other_files
+        except Exception as e:
+            xbmc.log(f"[Demostream] Sorting failed: {str(e)}", xbmc.LOGWARNING)
+            sorted_details = details
 
-    dialog = xbmcgui.Dialog()
-    items = []
+        # Get metadata for the episode
+        try:
+            episode = mongo_api.get_item("episodes", "episodeId", episodeId)
+            if not episode:
+                raise ValueError("Episode not found")
+                
+            serie_info = mongo_api.get_item("series", "serieId", episode.get("serieId")) if episode else None
+            season = mongo_api.get_item("seasons", "seasonId", episode.get("seasonId")) if episode else None
+            
+            thumb = (episode.get("stillUrl") or 
+                    (serie_info.get("posterUrl", "DefaultAddonVideo.png") if serie_info else "DefaultAddonVideo.png"))
+        except Exception as e:
+            xbmc.log(f"[Demostream] Metadata fetch failed: {str(e)}", xbmc.LOGERROR)
+            thumb = "DefaultAddonVideo.png"
+            serie_info = None
+            episode = None
 
-    for file in sorted_details:
-        audio = file.get("audio", ["Neznámy"])
-        resolution = file.get("resolution", "?")
-        size = file.get("size", "?")
-        bitrate = file.get("bitrate", "?")
-        codec = file.get("videoCodec", "?")
-        name = file.get("name", "N/A")
+        # Create selection dialog
+        dialog_items = []
+        try:
+            for file in sorted_details:
+                try:
+                    audio = file.get("audio", ["Neznámy"])
+                    resolution = file.get("resolution", "?")
+                    size = file.get("size", "?")
+                    bitrate = file.get("bitrate", "?")
+                    codec = file.get("videoCodec", "?")
+                    name = file.get("name", "N/A")
 
-        display_filename = "[COLOR FFFF8800]Demo[/COLOR][COLOR FFFFFFFF]Stream[/COLOR]" if "-dmstrm." in name.lower() else f"[COLOR FFFFFFFF]{name}[/COLOR]"
+                    display_filename = "[COLOR FFFF8800]Demo[/COLOR][COLOR FFFFFFFF]Stream[/COLOR]" if "-dmstrm." in name.lower() else f"[COLOR FFFFFFFF]{name}[/COLOR]"
 
-        li = xbmcgui.ListItem(label=f"[B]{resolution}[/B] • [COLOR FFFFCC00]{', '.join(audio)}[/COLOR] • [COLOR FF00FF00]{size}[/COLOR] • {bitrate} • {codec}")
-        li.setLabel2(display_filename)
-        li.setArt({'thumb': thumb, 'icon': 'DefaultAddonVideo.png'})
-        items.append(li)
+                    li = xbmcgui.ListItem(label=f"[B]{resolution}[/B] • [COLOR FFFFCC00]{', '.join(audio)}[/COLOR] • [COLOR FF00FF00]{size}[/COLOR] • {bitrate} • {codec}")
+                    li.setLabel2(display_filename)
+                    li.setArt({'thumb': thumb, 'icon': 'DefaultAddonVideo.png'})
+                    dialog_items.append(li)
+                except Exception as e:
+                    xbmc.log(f"[Demostream] Error creating dialog item: {str(e)}", xbmc.LOGWARNING)
+                    continue
+        except Exception as e:
+            xbmc.log(f"[Demostream] Dialog creation failed: {str(e)}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Chyba pri vytváraní výberu", xbmcgui.NOTIFICATION_ERROR)
+            return
 
-    index = dialog.select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", items, useDetails=True)
-    if index < 0:
-        return
+        # Show selection dialog
+        try:
+            dialog = xbmcgui.Dialog()
+            index = dialog.select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", dialog_items, useDetails=True)
+            if index < 0:
+                return  # User cancelled
+        except Exception as e:
+            xbmc.log(f"[Demostream] Dialog selection failed: {str(e)}", xbmc.LOGERROR)
+            return
 
-    selected_ident = sorted_details[index].get("ident")
-    play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection="episode_detail_links")
+        # Get selected stream URL
+        try:
+            selected_ident = sorted_details[index].get("ident")
+            if not selected_ident:
+                raise ValueError("Invalid stream ident")
+                
+            play_url = get_ws().get_stream_url(ident=selected_ident, mongo_collection="episode_detail_links")
+            
+            error_messages = {
+                "deleted": ("Vymazané", "Súbor bol vymazaný", xbmcgui.NOTIFICATION_INFO),
+                "unauthorized": ("Chyba", "Nemáte oprávnenie", xbmcgui.NOTIFICATION_ERROR),
+                "not_found": ("Chyba", "Súbor neexistuje", xbmcgui.NOTIFICATION_ERROR),
+                "password_protected": ("Chyba", "Súbor je zaheslovaný", xbmcgui.NOTIFICATION_ERROR),
+                None: ("Chyba", "Nepodarilo sa získať stream", xbmcgui.NOTIFICATION_ERROR)
+            }
 
-    error_messages = {
-        "deleted": ("Vymazané", f"Záznam {selected_ident} bol úspešne vymazaný.", xbmcgui.NOTIFICATION_INFO),
-        "unauthorized": ("Prístup odmietnutý", "Nemáš práva na mazanie z databázy.", xbmcgui.NOTIFICATION_ERROR),
-        "delete_error": ("Chyba", "Mazanie z databázy zlyhalo.", xbmcgui.NOTIFICATION_ERROR),
-        "not_found": ("Nenájdené", "Záznam s ident sa nenašiel.", xbmcgui.NOTIFICATION_INFO),
-        "password_protected": ("Súbor je zaheslovaný", "Nie je možné ho prehrať.", xbmcgui.NOTIFICATION_ERROR),
-        "temporarily_unavailable": ("Dočasne nedostupné", "Súbor je momentálne nedostupný.", xbmcgui.NOTIFICATION_WARNING),
-        "non_public_file": ("Súkromný súbor", "Obsah nie je verejný. Môže ísť o autorsky chránené video.", xbmcgui.NOTIFICATION_ERROR),
-        None: ("Stream URL", "Nepodarilo sa získať stream URL.", xbmcgui.NOTIFICATION_ERROR)
-    }
+            if play_url in error_messages:
+                title, msg, icon = error_messages[play_url]
+                xbmcgui.Dialog().notification(title, msg, icon)
+                return
+        except Exception as e:
+            xbmc.log(f"[Demostream] Stream URL fetch failed: {str(e)}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Chyba pri získavaní streamu", xbmcgui.NOTIFICATION_ERROR)
+            return
 
-    if play_url in error_messages:
-        title, message, icon = error_messages[play_url]
-        xbmcgui.Dialog().notification(title, message, icon)
-        return
+        # Play the stream with full error handling
+        try:
+            # Prepare metadata
+            label = episode.get("name", "Epizóda") if episode else "Epizóda"
+            year = serie_info.get("year", 0) if serie_info else 0
+            plot = episode.get("overview", "") if episode else ""
+            
+            extra_info = {
+                "season": season.get("season_number", 1) if season else 1,
+                "episode": episode.get("episode_number", 1) if episode else 1,
+                "tvshowtitle": serie_info.get("title", "") if serie_info else "",
+                "genre": ", ".join([get_genre_dict().get(str(gid), "") for gid in serie_info.get("genres", [])]) if serie_info else "",
+                "plot": plot,
+                "mediatype": "episode"
+            }
 
-    label = episode.get("name", "Epizóda") if episode else "Epizóda"
-    year = serie_info.get("year", 0) if serie_info else 0
-    plot = episode.get("overview", "") if episode else ""
-    extra_info = {
-        "season": season.get("season_number", 1) if season else 1,
-        "episode": episode.get("episode_number", 1) if episode else 1,
-        "tvshowtitle": serie_info.get("title", "") if serie_info else "",
-        "genre": serie_info.get("genres", "") if serie_info else "",
-        "plot": plot
-    }
+            # Create list item
+            list_item = create_compatible_list_item(
+                label, 
+                plot, 
+                year, 
+                thumb, 
+                extra_info
+            )
+            list_item.setPath(play_url)
+            
+            # Stop any existing playback
+            if xbmc.Player().isPlaying():
+                xbmc.Player().stop()
+                
+            # Small delay before playback
+            xbmc.sleep(300)
+            
+            # Set resolved URL
+            xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
+            
+            # Save to history
+            if serie_info:
+                save_played_series(serie_info.get("serieId"))
+            
+            # Small delay after playback starts
+            xbmc.sleep(500)
+            
+        except Exception as e:
+            xbmc.log(f"[Demostream] Playback failed: {str(e)}", xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Chyba", "Chyba pri spustení prehrávania", xbmcgui.NOTIFICATION_ERROR)
+            try:
+                if xbmc.Player().isPlaying():
+                    xbmc.Player().stop()
+            except:
+                pass
+            return
 
-    xbmc.log(f"[Demostream] Prehrávam epizódu: {label}", xbmc.LOGINFO)
-
-    list_item = create_compatible_list_item(
-        label, 
-        plot, 
-        year, 
-        thumb, 
-        extra_info
-    )
-    list_item.setPath(play_url)
-    xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, list_item)
-
-    if serie_info:
-        save_played_series(serie_info.get("serieId"))
+    except Exception as e:
+        xbmc.log(f"[Demostream] FATAL ERROR in select_stream_serie: {str(e)}", xbmc.LOGERROR)
+        xbmcgui.Dialog().notification("Kritická chyba", "Došlo k neočakávanej chybe", xbmcgui.NOTIFICATION_ERROR)
+    finally:
+        # Cleanup
+        xbmc.executebuiltin('Dialog.Close(all,true)')
 
 # CSFD typy na dnes
 def typy_na_dnes_csfd():

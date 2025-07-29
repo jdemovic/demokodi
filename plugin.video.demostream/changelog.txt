@@ -1,3 +1,6 @@
+Version 1.2.7
+- zvysenie stability pluginu, pridanie delay a cistenie Player po prehravani
+
 Version 1.2.6
 - opatovne nastavenie redis chache z noveho kontajnera
 - vyrazne zrychlenie nacitania prehladov
