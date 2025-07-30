@@ -506,65 +506,78 @@ def process_tmdb_search_results(query, page=1):
     xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Výsledky vyhľadávania')
     xbmcplugin.setContent(ADDON_HANDLE, 'videos')
 
-    # Add "Go to main menu" as first item
+    # Pridaj navigáciu na začiatok
     url = build_url({'action': 'main_menu'})
     li = xbmcgui.ListItem(label='[B]<< Prejdi na hlavné menu[/B]')
     li.setArt({'icon': 'DefaultFolderBack.png'})
     xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
 
-    # Get TMDB results
+    # Nacitaj predchádzajúce výsledky
     tmdb_results = search_movie_tmdb(query)
     if not tmdb_results:
         xbmcgui.Dialog().notification("Info", "Nenašli sa žiadne výsledky.", xbmcgui.NOTIFICATION_INFO, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
 
-    # Verify against our DB and create combined results
+    # konverzia tmdbId na int a filtrovanie podľa mediaType
+    movie_ids = [int(item['tmdbId']) for item in tmdb_results if item['mediaType'] == 'movie']
+    series_ids = [int(item['tmdbId']) for item in tmdb_results if item['mediaType'] == 'tv']
+    
+    xbmc.log(f"Found {len(movie_ids)} movies and {len(series_ids)} series for query: {query}", xbmc.LOGINFO)
+    
+    # Hromadné načítanie filmov a seriálov
     movies_found = []
     series_found = []
 
+    if movie_ids:
+        movies_found = list(mongo_api.get_items(
+            "movies",
+            query={
+                "tmdbId": {"$in": movie_ids},
+                "status": 1
+            }
+        ))
+
+    if series_ids:
+        series_found = list(mongo_api.get_items(
+            "series",
+            query={
+                "tmdbId": {"$in": series_ids}
+            }
+        ))
+
+    # Spojiť výsledky a zachovať pôvodné poradie
+    all_results = []
+    id_to_movie = {int(m['tmdbId']): m for m in movies_found}
+    id_to_series = {int(s['tmdbId']): s for s in series_found}
+
     for item in tmdb_results:
-        tmdb_id = item['tmdbId']
-        media_type = item['mediaType']
+        tmdb_id = int(item['tmdbId'])
+        if item['mediaType'] == 'movie' and tmdb_id in id_to_movie:
+            all_results.append(('movie', id_to_movie[tmdb_id]))
+        elif item['mediaType'] == 'tv' and tmdb_id in id_to_series:
+            all_results.append(('series', id_to_series[tmdb_id]))
 
-        if media_type == "movie":
-            # Check movies collection
-            movie = mongo_api.get_item("movies", "tmdbId", tmdb_id)
-            if movie and movie.get("status") == 1:
-                movies_found.append(movie)
-        elif media_type == "tv":
-            # Check series collection
-            series = mongo_api.get_item("series", "tmdbId", tmdb_id)
-            if series:
-                series_found.append(series)
-
-    # Pagination
+    # Paginácia
     skip_count = (page - 1) * PER_PAGE
-    all_results = movies_found + series_found
-    total_results = len(all_results)
+    paged_results = all_results[skip_count:skip_count + PER_PAGE]
 
-    if not all_results:
-        xbmcgui.Dialog().notification("Info", "Nenašli sa žiadne výsledky v tvojej knižnici.", xbmcgui.NOTIFICATION_INFO, 3000)
-        xbmcplugin.endOfDirectory(ADDON_HANDLE)
-        return
-
-    # Add "Previous page" if needed
+    # Pridať "Previous page" ak je potrebné
     if page > 1:
         prev_page_url = build_url({'action': 'search_results', 'query': query, 'page': page - 1})
         li = xbmcgui.ListItem(label='[B]< Predošlá strana[/B]')
         li.setArt({'icon': 'DefaultFolderBack.png'})
         xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=prev_page_url, listitem=li, isFolder=True)
 
-    # Display movies
-    for movie in movies_found[skip_count:skip_count + PER_PAGE]:
-        add_movie_listitem(movie, ADDON_HANDLE)
+    # Zobraziť výsledky
+    for item_type, item in paged_results:
+        if item_type == 'movie':
+            add_movie_listitem(item, ADDON_HANDLE)
+        else:
+            add_series_listitem(item, ADDON_HANDLE)
 
-    # Display series
-    for series in series_found[skip_count:skip_count + PER_PAGE]:
-        add_series_listitem(series, ADDON_HANDLE)
-
-    # Add "Next page" if needed
-    if total_results > skip_count + PER_PAGE:
+    # Pridať "Next page" ak je potrebné
+    if len(all_results) > skip_count + PER_PAGE:
         next_page_url = build_url({'action': 'search_results', 'query': query, 'page': page + 1})
         li = xbmcgui.ListItem(label='[B]>> Ďalšia strana[/B]')
         xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=next_page_url, listitem=li, isFolder=True)
