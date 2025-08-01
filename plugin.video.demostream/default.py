@@ -74,9 +74,38 @@ resolution_order = {
     "480p": 1
 }
 
-# Pomocná funkcia na získanie kolekcie - už nie je potrebná
-# def get_collection(collection_name):
-#     return db[collection_name]
+def safe_dialog_select(title, items):
+    try:
+        dialog = xbmcgui.Dialog()
+        index = dialog.select(title, items, useDetails=True)
+        if index < 0:
+            xbmc.log(f"[DemoStream] Používateľ zrušil výber: {title}", xbmc.LOGINFO)
+        return index
+    except Exception as e:
+        xbmc.log(f"[DemoStream] Chyba pri zobrazovaní dialógu '{title}': {e}", xbmc.LOGERROR)
+        return -1
+
+def safe_player_stop():
+    try:
+        if xbmc.Player().isPlaying():
+            xbmc.Player().stop()
+            xbmc.sleep(500)
+    except Exception as e:
+        xbmc.log(f"[DemoStream] Chyba pri zastavovaní prehrávača: {e}", xbmc.LOGWARNING)
+
+def safe_container_refresh():
+    try:
+        xbmc.sleep(300)
+        xbmc.executebuiltin("Container.Refresh")
+    except Exception as e:
+        xbmc.log(f"[DemoStream] Chyba pri obnovovaní kontajnera: {e}", xbmc.LOGWARNING)
+
+def safe_close_dialog():
+    try:
+        if xbmcgui.getCurrentWindowDialogId() != -1:
+            xbmc.executebuiltin('Dialog.Close(all,true)')
+    except Exception as e:
+        xbmc.log(f"[DemoStream] Chyba pri zatváraní dialógov: {e}", xbmc.LOGWARNING)
 
 def get_ws():
     global ws
@@ -211,7 +240,7 @@ def remove_from_watch_later(item_type, item_id):
     items = [i for i in items if not (i['type'] == item_type and i['id'] == item_id)]
     save_watch_later(items)
     xbmcgui.Dialog().notification("Odstránené", "Odstránené zo zoznamu", xbmcgui.NOTIFICATION_INFO)
-    xbmc.executebuiltin("Container.Refresh")
+    safe_container_refresh()
 
 #-------- Pridanie položky do zoznamu pre movies --------
 def add_movie_listitem(movie, addon_handle, context_items=None):
@@ -498,7 +527,7 @@ def search_movies():
         save_search_term(search_text)
         process_tmdb_search_results(search_text)
     else:
-        xbmc.log("Hľadanie bolo zrušené (ESC alebo klik na Cancel).", xbmc.LOGINFO)
+        xbmc.log("[DemoStream] Hľadanie bolo zrušené (ESC alebo klik na Cancel).", xbmc.LOGINFO)
         main_menu()
 
 def process_tmdb_search_results(query, page=1):
@@ -523,7 +552,7 @@ def process_tmdb_search_results(query, page=1):
     movie_ids = [int(item['tmdbId']) for item in tmdb_results if item['mediaType'] == 'movie']
     series_ids = [int(item['tmdbId']) for item in tmdb_results if item['mediaType'] == 'tv']
     
-    xbmc.log(f"Found {len(movie_ids)} movies and {len(series_ids)} series for query: {query}", xbmc.LOGINFO)
+    xbmc.log(f"[DemoStream] Found {len(movie_ids)} movies and {len(series_ids)} series for query: {query}", xbmc.LOGINFO)
     
     # Hromadné načítanie filmov a seriálov
     movies_found = []
@@ -619,7 +648,7 @@ def show_movies(query=None, page=1):
         add_pagination_controls(page, count, PER_PAGE, query, action='show_movies')
 
     except Exception as e:
-        xbmc.log(f"Error in show_movies: {str(e)}", xbmc.LOGERROR)
+        xbmc.log(f"[DemoStream] Error in show_movies: {str(e)}", xbmc.LOGERROR)
         xbmcgui.Dialog().notification("Chyba", "Problém s pripojením k API", xbmcgui.NOTIFICATION_ERROR)
     finally:
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
@@ -787,14 +816,14 @@ def list_latest_series():
             add_series_listitem(s, ADDON_HANDLE)
 
     except Exception as e:
-        xbmc.log(f"Error in list_latest_series: {str(e)}", xbmc.LOGERROR)
+        xbmc.log(f"[DemoStream] Error in list_latest_series: {str(e)}", xbmc.LOGERROR)
         xbmcgui.Dialog().notification("Chyba", "Problém s pripojením k API", xbmcgui.NOTIFICATION_ERROR)
     finally:
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 #-------- Najnovšie pridané seriály --------
 def list_latest_added_series(page=1):
-    xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Najnovšie pridané seriály')
+    xbmcplugin.setPluginCategory(ADDON_HANDLE, 'Najnovšie pridané seribury')
     xbmcplugin.setContent(ADDON_HANDLE, 'tvshows')
 
     skip_count = (page - 1) * PER_PAGE
@@ -849,7 +878,7 @@ def list_recent_searches():
             li = xbmcgui.ListItem(label=term.strip())
             xbmcplugin.addDirectoryItem(handle=ADDON_HANDLE, url=url, listitem=li, isFolder=True)
         else:
-            xbmc.log(f"[SC3] Preskočený neplatný výraz vo vyhľadávacej histórii: {term}", xbmc.LOGWARNING)
+            xbmc.log(f"[DemoStream] Preskočený neplatný výraz vo vyhľadávacej histórii: {term}", xbmc.LOGWARNING)
 
     xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
@@ -864,9 +893,23 @@ def list_played_movies():
         xbmcgui.Dialog().notification("Bez záznamov", "Žiadne nedávno prehrávané filmy.", xbmcgui.NOTIFICATION_INFO, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
+    
+    # Explicitne ošetrenie, že všetky ID sú int
+    history = [int(movie_id) for movie_id in history if str(movie_id).isdigit()]
+    
+    # Hromadné načítanie všetkých filmov naraz
+    movies = list(mongo_api.get_items(
+        "movies",
+        query={"movieId": {"$in": history}},
+        limit=len(history)
+    ))
 
+    # Vytvorenie mapy movieId -> movie pre rýchle vyhľadávanie
+    movie_map = {m["movieId"]: m for m in movies}
+
+    # Zobrazenie v pôvodnom poradí z histórie
     for movie_id in history:
-        movie = mongo_api.get_item("movies", "movieId", movie_id)
+        movie = movie_map.get(movie_id)
         if movie:
             add_movie_listitem(movie, ADDON_HANDLE)
 
@@ -883,9 +926,23 @@ def list_played_series():
         xbmcgui.Dialog().notification("Bez záznamov", "Žiadne nedávno prehrávané seriály.", xbmcgui.NOTIFICATION_INFO, 3000)
         xbmcplugin.endOfDirectory(ADDON_HANDLE)
         return
+    
+    # Konverzia na int pre každé ID
+    history = [int(serie_id) for serie_id in history if str(serie_id).isdigit()]
+    
+    # Hromadné načítanie všetkých seriálov naraz
+    series = list(mongo_api.get_items(
+        "series",
+        query={"serieId": {"$in": history}},
+        limit=len(history)
+    ))
 
+    # Vytvorenie mapy serieId -> series pre rýchle vyhľadávanie
+    series_map = {s["serieId"]: s for s in series}
+
+    # Zobrazenie v pôvodnom poradí z histórie
     for serie_id in history:
-        series = mongo_api.get_item("series", "serieId", serie_id)
+        series = series_map.get(serie_id)
         if series:
             add_series_listitem(series, ADDON_HANDLE)
 
@@ -1142,7 +1199,7 @@ def set_video_info_tag(li, info):
                 tag.setGenres([g.strip() for g in info['genre'].split(',') if g.strip()])
                 
     except Exception as e:
-        xbmc.log(f"[Demostream] InfoTag error: {str(e)}", xbmc.LOGERROR)
+        xbmc.log(f"[DemoStream] InfoTag error: {str(e)}", xbmc.LOGERROR)
 
 def select_stream(movie_id):
     try:
@@ -1150,7 +1207,7 @@ def select_stream(movie_id):
         try:
             movie_id = int(movie_id)
         except (ValueError, TypeError):
-            xbmc.log(f"[Demostream] Invalid movie_id: {movie_id}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Invalid movie_id: {movie_id}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Neplatné ID filmu", xbmcgui.NOTIFICATION_ERROR)
             return
 
@@ -1158,13 +1215,13 @@ def select_stream(movie_id):
         #xbmc.executebuiltin('SetSetting(video.accel.method,0)')
         #xbmc.sleep(200)  # Allow settings to apply
 
-        # Get movie details with error handling
+        # Get movie details, with error handling
         try:
             movie_info = mongo_api.get_item("movies", "movieId", movie_id)
             if not movie_info:
                 raise ValueError("Movie not found in database")
         except Exception as e:
-            xbmc.log(f"[Demostream] Database error: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Database error: {str(e)}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Nepodarilo sa načítať informácie o filme", xbmcgui.NOTIFICATION_ERROR)
             return
 
@@ -1175,7 +1232,7 @@ def select_stream(movie_id):
                 xbmcgui.Dialog().notification("Info", "Pre tento film nie sú dostupné žiadne streamy", xbmcgui.NOTIFICATION_INFO)
                 return
         except Exception as e:
-            xbmc.log(f"[Demostream] Stream query failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Stream query failed: {str(e)}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Chyba pri načítaní streamov", xbmcgui.NOTIFICATION_ERROR)
             return
 
@@ -1194,7 +1251,7 @@ def select_stream(movie_id):
             other_files.sort(key=sort_key)
             sorted_details = dmstrm_files + other_files
         except Exception as e:
-            xbmc.log(f"[Demostream] Sorting failed: {str(e)}", xbmc.LOGWARNING)
+            xbmc.log(f"[DemoStream] Sorting failed: {str(e)}", xbmc.LOGWARNING)
             sorted_details = details  # Fallback to unsorted list
 
         # Create selection dialog
@@ -1217,21 +1274,21 @@ def select_stream(movie_id):
                     li.setArt({'thumb': default_thumb, 'icon': 'DefaultAddonVideo.png'})
                     dialog_items.append(li)
                 except Exception as e:
-                    xbmc.log(f"[Demostream] Error creating listitem: {str(e)}", xbmc.LOGWARNING)
+                    xbmc.log(f"[DemoStream] Error creating listitem: {str(e)}", xbmc.LOGWARNING)
                     continue
         except Exception as e:
-            xbmc.log(f"[Demostream] Dialog creation failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Dialog creation failed: {str(e)}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Chyba pri vytváraní výberu", xbmcgui.NOTIFICATION_ERROR)
             return
 
         # Show selection dialog
         try:
-            dialog = xbmcgui.Dialog()
-            index = dialog.select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", dialog_items, useDetails=True)
+            index = safe_dialog_select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", dialog_items)
             if index < 0:
+                xbmc.log("[DemoStream] Výber streamu zrušený používateľom", xbmc.LOGINFO)
                 return  # User cancelled
         except Exception as e:
-            xbmc.log(f"[Demostream] Dialog selection failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Dialog selection failed: {str(e)}", xbmc.LOGERROR)
             return
 
         # Get selected stream URL
@@ -1255,7 +1312,7 @@ def select_stream(movie_id):
                 xbmcgui.Dialog().notification(title, msg, icon)
                 return
         except Exception as e:
-            xbmc.log(f"[Demostream] Stream URL fetch failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Stream URL fetch failed: {str(e)}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Chyba pri získavaní streamu", xbmcgui.NOTIFICATION_ERROR)
             return
 
@@ -1275,10 +1332,8 @@ def select_stream(movie_id):
             list_item.setPath(play_url)
             
             # Stop any existing playback
-            if xbmc.Player().isPlaying():
-                xbmc.Player().stop()
-                xbmc.sleep(500)
-                
+            safe_player_stop()
+
             # Small delay before playback
             xbmc.sleep(300)
             
@@ -1289,26 +1344,23 @@ def select_stream(movie_id):
             save_played_movie(movie_id)
             
             # Small delay after playback starts
-            xbmc.sleep(700)
+            xbmc.sleep(300)
             
         except Exception as e:
-            xbmc.log(f"[Demostream] Playback failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Playback failed: {str(e)}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Chyba pri spustení prehrávania", xbmcgui.NOTIFICATION_ERROR)
             try:
-                if xbmc.Player().isPlaying():
-                    xbmc.Player().stop()
-                    xbmc.sleep(500)
+                safe_player_stop()
             except:
                 pass
             return
 
     except Exception as e:
-        xbmc.log(f"[Demostream] FATAL ERROR in select_stream: {str(e)}", xbmc.LOGERROR)
+        xbmc.log(f"[DemoStream] FATAL ERROR in select_stream: {str(e)}", xbmc.LOGERROR)
         xbmcgui.Dialog().notification("Kritická chyba", "Došlo k neočakávanej chybe", xbmcgui.NOTIFICATION_ERROR)
     finally:
         # Cleanup
-        if xbmcgui.getCurrentWindowDialogId() != -1:
-            xbmc.executebuiltin('Dialog.Close(all,true)')
+        safe_close_dialog()
 
 def select_stream_serie(episodeId):
     try:
@@ -1316,7 +1368,7 @@ def select_stream_serie(episodeId):
         try:
             episodeId = int(episodeId)
         except (ValueError, TypeError):
-            xbmc.log(f"[Demostream] Invalid episodeId: {episodeId}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Invalid episodeId: {episodeId}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Neplatné ID epizódy", xbmcgui.NOTIFICATION_ERROR)
             return
 
@@ -1331,7 +1383,7 @@ def select_stream_serie(episodeId):
                 xbmcgui.Dialog().notification("Info", "Pre túto epizódu nie sú dostupné streamy", xbmcgui.NOTIFICATION_INFO)
                 return
         except Exception as e:
-            xbmc.log(f"[Demostream] Episode query failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Episode query failed: {str(e)}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Chyba pri načítaní epizódy", xbmcgui.NOTIFICATION_ERROR)
             return
 
@@ -1350,7 +1402,7 @@ def select_stream_serie(episodeId):
             other_files.sort(key=sort_key)
             sorted_details = dmstrm_files + other_files
         except Exception as e:
-            xbmc.log(f"[Demostream] Sorting failed: {str(e)}", xbmc.LOGWARNING)
+            xbmc.log(f"[DemoStream] Sorting failed: {str(e)}", xbmc.LOGWARNING)
             sorted_details = details
 
         # Get metadata for the episode
@@ -1365,7 +1417,7 @@ def select_stream_serie(episodeId):
             thumb = (episode.get("stillUrl") or 
                     (serie_info.get("posterUrl", "DefaultAddonVideo.png") if serie_info else "DefaultAddonVideo.png"))
         except Exception as e:
-            xbmc.log(f"[Demostream] Metadata fetch failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Metadata fetch failed: {str(e)}", xbmc.LOGERROR)
             thumb = "DefaultAddonVideo.png"
             serie_info = None
             episode = None
@@ -1389,21 +1441,21 @@ def select_stream_serie(episodeId):
                     li.setArt({'thumb': thumb, 'icon': 'DefaultAddonVideo.png'})
                     dialog_items.append(li)
                 except Exception as e:
-                    xbmc.log(f"[Demostream] Error creating dialog item: {str(e)}", xbmc.LOGWARNING)
+                    xbmc.log(f"[DemoStream] Error creating dialog item: {str(e)}", xbmc.LOGWARNING)
                     continue
         except Exception as e:
-            xbmc.log(f"[Demostream] Dialog creation failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Dialog creation failed: {str(e)}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Chyba pri vytváraní výberu", xbmcgui.NOTIFICATION_ERROR)
             return
 
         # Show selection dialog
         try:
-            dialog = xbmcgui.Dialog()
-            index = dialog.select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", dialog_items, useDetails=True)
+            index = safe_dialog_select("Vyberte stream: [COLOR FFFFCC00]Rozlišenie • Veľkosť[/COLOR]", dialog_items)
             if index < 0:
+                xbmc.log("[DemoStream] Výber streamu zrušený používateľom", xbmc.LOGINFO)
                 return  # User cancelled
         except Exception as e:
-            xbmc.log(f"[Demostream] Dialog selection failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Dialog selection failed: {str(e)}", xbmc.LOGERROR)
             return
 
         # Get selected stream URL
@@ -1427,7 +1479,7 @@ def select_stream_serie(episodeId):
                 xbmcgui.Dialog().notification(title, msg, icon)
                 return
         except Exception as e:
-            xbmc.log(f"[Demostream] Stream URL fetch failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Stream URL fetch failed: {str(e)}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Chyba pri získavaní streamu", xbmcgui.NOTIFICATION_ERROR)
             return
 
@@ -1458,8 +1510,7 @@ def select_stream_serie(episodeId):
             list_item.setPath(play_url)
             
             # Stop any existing playback
-            if xbmc.Player().isPlaying():
-                xbmc.Player().stop()
+            safe_player_stop()
                 
             # Small delay before playback
             xbmc.sleep(300)
@@ -1472,25 +1523,23 @@ def select_stream_serie(episodeId):
                 save_played_series(serie_info.get("serieId"))
             
             # Small delay after playback starts
-            xbmc.sleep(700)
+            xbmc.sleep(300)
             
         except Exception as e:
-            xbmc.log(f"[Demostream] Playback failed: {str(e)}", xbmc.LOGERROR)
+            xbmc.log(f"[DemoStream] Playback failed: {str(e)}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("Chyba", "Chyba pri spustení prehrávania", xbmcgui.NOTIFICATION_ERROR)
             try:
-                if xbmc.Player().isPlaying():
-                    xbmc.Player().stop()
+                safe_close_dialog()
             except:
                 pass
             return
 
     except Exception as e:
-        xbmc.log(f"[Demostream] FATAL ERROR in select_stream_serie: {str(e)}", xbmc.LOGERROR)
+        xbmc.log(f"[DemoStream] FATAL ERROR in select_stream_serie: {str(e)}", xbmc.LOGERROR)
         xbmcgui.Dialog().notification("Kritická chyba", "Došlo k neočakávanej chybe", xbmcgui.NOTIFICATION_ERROR)
     finally:
         # Cleanup
-        if xbmcgui.getCurrentWindowDialogId() != -1:
-            xbmc.executebuiltin('Dialog.Close(all,true)')
+        safe_close_dialog()
 
 # CSFD typy na dnes
 def typy_na_dnes_csfd():
@@ -1614,7 +1663,7 @@ def get_initials_summary():
         for item in items:
             result[item["_id"]] = item["count"]
     except Exception as e:
-        xbmc.log(f"Chyba pri získavaní súhrnu iniciál: {str(e)}", xbmc.LOGERROR)
+        xbmc.log(f"[DemoStream] Chyba pri získavaní súhrnu iniciál: {str(e)}", xbmc.LOGERROR)
         # Fallback - ručné získanie pre každé písmeno
         letters = [chr(i) for i in range(65, 91)] + [str(i) for i in range(10)]
         for letter in letters:
@@ -1844,7 +1893,7 @@ def list_top_popular_movies_czsk():
                     data = future.result()
                     popular_ids.extend(item["id"] for item in data.get("results", []))
                 except Exception as e:
-                    xbmc.log(f"Chyba pri načítaní stránky: {e}", xbmc.LOGWARNING)
+                    xbmc.log(f"[DemoStream] Chyba pri načítaní stránky: {e}", xbmc.LOGWARNING)
 
         # 2. Hromadné načítanie filmov z MongoDB
         if not popular_ids:
@@ -1911,7 +1960,7 @@ def list_trending_movies_last_14_days():
                     for item in data.get("results", []):
                         trending_ids.add(item["id"])
                 except Exception as e:
-                    xbmc.log(f"Chyba pri načítaní trendov: {e}", xbmc.LOGWARNING)
+                    xbmc.log(f"[DemoStream] Chyba pri načítaní trendov: {e}", xbmc.LOGWARNING)
 
         trending_ids = list(trending_ids)
         if not trending_ids:
@@ -1966,7 +2015,7 @@ def list_top_rated_movies_czsk():
                     data = future.result()
                     top_rated_ids.extend(item["id"] for item in data.get("results", []))
                 except Exception as e:
-                    xbmc.log(f"Chyba pri načítaní: {e}", xbmc.LOGWARNING)
+                    xbmc.log(f"[DemoStream] Chyba pri načítaní: {e}", xbmc.LOGWARNING)
 
         if not top_rated_ids:
             return []
