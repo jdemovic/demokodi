@@ -1559,7 +1559,7 @@ def typy_na_dnes_csfd():
             movie = redis_cache.get_or_cache(
                 cache_key,
                 lambda: mongo_api.get_item("movies", "title", item["title"], query={"year": item["year"]}),
-                ttl=86400  # 1 deň pre jednotlivé filmy
+                ttl=14400  # 4 hodiny
             )
             
             if movie and movie.get("status") == 1:
@@ -1570,7 +1570,7 @@ def typy_na_dnes_csfd():
     movies = redis_cache.get_or_cache(
         "csfd_tips_list",
         fetch_csfd_tips,
-        ttl=21600  # 6 hodín pre celý zoznam
+        ttl=14400  # 4 hodiny
     )
 
     if not movies:

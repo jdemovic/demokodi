@@ -7,7 +7,8 @@ from bson import ObjectId
 from datetime import datetime
 
 # ==== VLASTNÉ NASTAVENIA REDISU TU ↓↓↓ ====
-REDIS_HOST = "redis.demolator.app"
+#REDIS_HOST = "redis.demolator.app"
+REDIS_HOST = "91.99.208.89"
 REDIS_PORT = 6379
 REDIS_SSL = True
 REDIS_PASSWORD = None  # ak máš heslo, zadaj ako string
