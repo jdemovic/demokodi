@@ -3,16 +3,93 @@ import urllib.parse
 import urllib.request
 import json
 import xbmc
+import xbmcgui
+import xbmcaddon
 import socket
 import time
 from typing import Any
 from functools import wraps
 
-#API_BASE = "https://web.demolator.app/mongo"
-API_BASE = "http://91.99.208.89:10000/mongo"
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # sekundy
 NETWORK_TIMEOUT = 30  # sekundy
+
+# Nastavenia
+PRIMARY_API = "https://web.demolator.app/mongo"
+FALLBACK_API = "http://91.99.208.89:10000/mongo"
+
+# Globálna premenná pre aktuálnu API URL
+API_BASE = PRIMARY_API
+LAST_CONNECTION_CHECK = 0
+CONNECTION_CACHE_TIME = 3600  # 1 hodina
+
+class APIConnectionManager:
+    def __init__(self):
+        self.last_status = None  # Uchováva posledný stav ('primary' alebo 'fallback')
+        self.notified = False  # Flag, či bola notifikácia už zobrazená
+        self.last_check_time = 0
+        self.check_interval = 3600  # 1 hodina medzi kontrolami
+
+    def check_connection(self, api_url, timeout=3):
+        """Skontroluje dostupnosť API servera"""
+        try:
+            req = urllib.request.Request(api_url.rstrip('/'), method="GET")
+            req.timeout = timeout
+            with urllib.request.urlopen(req) as response:
+                return response.getcode() != 502
+        except urllib.error.HTTPError as e:
+            return e.code != 502
+        except Exception:
+            return False
+
+    def determine_api_base(self, primary_url, fallback_url):
+        """Rozhodne, ktorý server použiť s inteligentnými notifikáciami"""
+        current_time = time.time()
+        
+        # Kontrola nastavenia v addone
+        addon = xbmcaddon.Addon()
+        if addon.getSettingBool("use_fallback_server"):
+            if self.last_status != 'fallback':
+                xbmcgui.Dialog().notification(
+                    "DemoStream", 
+                    "Používam záložný server (manuálne nastavenie)",
+                    xbmcgui.NOTIFICATION_WARNING
+                )
+                self.last_status = 'fallback'
+                self.notified = True
+            return fallback_url
+
+        # Kontrola len ak uplynul dostatočný čas
+        if current_time - self.last_check_time < self.check_interval:
+            return primary_url if self.last_status == 'primary' else fallback_url
+
+        self.last_check_time = current_time
+        is_primary_available = self.check_connection(primary_url)
+
+        if is_primary_available:
+            if self.last_status != 'primary':
+                if self.last_status is not None:  # Notifikácia len ak už bol nejaký stav nastavený
+                    xbmcgui.Dialog().notification(
+                        "DemoStream", 
+                        "Pripojené k primárnemu serveru",
+                        xbmcgui.NOTIFICATION_INFO
+                    )
+                self.last_status = 'primary'
+                self.notified = True
+            return primary_url
+        else:
+            if self.last_status != 'fallback':
+                xbmcgui.Dialog().notification(
+                    "DemoStream", 
+                    "Primárny server nedostupný, prepínam na záložný",
+                    xbmcgui.NOTIFICATION_WARNING
+                )
+                self.last_status = 'fallback'
+                self.notified = True
+            return fallback_url
+
+# Globálna inštancia správcu spojenia
+api_manager = APIConnectionManager()
 
 def handle_errors(func):
     """Dekorátor pre jednotnú chybovú obsluhu"""
@@ -74,6 +151,7 @@ def wait_for_connection(max_wait=30):
 @handle_errors
 def get_items(collection, query=None, sort=None, skip=0, limit=None):
     """Získaj zoznam položiek z kolekcie pomocou POST"""
+    API_BASE = api_manager.determine_api_base(PRIMARY_API, FALLBACK_API)
     url = f"{API_BASE}/items"
     payload = {
         "collection": collection,
@@ -104,6 +182,7 @@ def get_items(collection, query=None, sort=None, skip=0, limit=None):
 @handle_errors
 def get_item(collection: str, field: str, value: Any, query=None):
     """Získaj jednu položku podľa kolekcie, poľa a voliteľného query pomocou POST"""
+    API_BASE = api_manager.determine_api_base(PRIMARY_API, FALLBACK_API)
     url = f"{API_BASE}/item"
     post_data = json.dumps({
         "collection": collection,
@@ -128,6 +207,7 @@ def get_item(collection: str, field: str, value: Any, query=None):
 @handle_errors
 def insert_item(collection: str, data: dict):
     """Vlož novú položku pomocou POST"""
+    API_BASE = api_manager.determine_api_base(PRIMARY_API, FALLBACK_API)
     url = f"{API_BASE}/insert_item"
     json_data = json.dumps({"collection": collection, "data": data}, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=json_data, method="POST")
@@ -147,6 +227,7 @@ def insert_item(collection: str, data: dict):
 @handle_errors
 def update_item(collection: str, field: str, value: str, update_data: dict):
     """Aktualizuj položku podľa poľa pomocou POST"""
+    API_BASE = api_manager.determine_api_base(PRIMARY_API, FALLBACK_API)
     url = f"{API_BASE}/update_item"
     post_data = json.dumps({
         "collection": collection,
@@ -171,6 +252,7 @@ def update_item(collection: str, field: str, value: str, update_data: dict):
 @handle_errors
 def delete_item(collection: str, field: str, value: str):
     """Zmaž položku pomocou POST"""
+    API_BASE = api_manager.determine_api_base(PRIMARY_API, FALLBACK_API)
     url = f"{API_BASE}/delete_item"
     post_data = json.dumps({
         "collection": collection,
@@ -194,6 +276,7 @@ def delete_item(collection: str, field: str, value: str):
 @handle_errors
 def run_aggregation(collection: str, pipeline: list):
     """Spusti aggregate pipeline pomocou POST"""
+    API_BASE = api_manager.determine_api_base(PRIMARY_API, FALLBACK_API)
     url = f"{API_BASE}/aggregate"
     post_data = json.dumps({"collection": collection, "pipeline": pipeline}, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=post_data, method="POST")

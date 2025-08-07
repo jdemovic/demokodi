@@ -502,7 +502,8 @@ def main_menu():
         ('Vymazať históriu hľadania', 'clear_search_history', 'DefaultVideoDeleted.png'),
         ('Vymazať naposledy sledované zoznamy', 'clear_played_history', 'DefaultVideoDeleted.png'),
         ('Filmy', 'show_movies', 'DefaultVideo.png'),
-        ('Seriály', 'list_series', 'DefaultTVShows.png')
+        ('Seriály', 'list_series', 'DefaultTVShows.png'),
+        ('Nastavenia', 'open_settings', 'DefaultSettings.png')
     ]
 
     # Pridanie položiek do menu
@@ -2131,6 +2132,8 @@ elif action == 'remove_watch_later':
     remove_from_watch_later(params.get('type'), int(params.get('id')))
 elif action == 'list_watch_later':
     list_watch_later()
+elif action == 'open_settings':
+    addon.openSettings()
 else:
     # Initial login and main menu
     main_menu()

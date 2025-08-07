@@ -3,6 +3,9 @@
         <setting id="webshare_user" type="text" label="Webshare používateľ" default="" />
         <setting id="webshare_pass" type="text" label="Webshare heslo" default="" option="hidden" />
     </category>
+    <category label="Záložný server">
+        <setting id="use_fallback_server" type="bool" label="Použiť záložný server" default="false" />
+    </category>
     <category label="TMDB API">
         <setting id="tmdb_api_key" type="text" label="TMDB API kľúč" default="0195edd0dfc6c90117e6fc7fe70a320c" option="hidden"/>
         <setting id="tmdb_language" type="text" label="Jazyk TMDB" default="cz-CZ" />

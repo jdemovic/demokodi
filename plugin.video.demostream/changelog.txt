@@ -1,3 +1,9 @@
+Version 1.3.2
+- Automaticke prepinanie na zalozny server pri nedostupnosti primarneho servera (nasledna kontrola o hodinu)
+- Moznost nastavit pouzitie zalozneho servera v nastaveniach
+- Notifikacie pri pouzivani zalozneho servera (test/debug mod) - v buducnosti redukovane
+- Pridana polozka "Nastavenia" do hlavneho menu
+
 Version 1.3.1
 - CSFD zoznam cache na 4 hodiny
 - Pouzity backup server bez https pre pristup do mongo/redis koli vypadku primary servera
