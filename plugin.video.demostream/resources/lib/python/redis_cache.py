@@ -9,7 +9,7 @@ from datetime import datetime
 
 # ==== NASTAVENIA REDIS ====
 PRIMARY_HOST = "redis.demolator.app"
-FALLBACK_HOST = "91.99.208.89"
+FALLBACK_HOST = "redis.demostream.stream"
 REDIS_PORT = 6379
 REDIS_SSL = True
 REDIS_PASSWORD = None  # ak máš heslo, zadaj ako string

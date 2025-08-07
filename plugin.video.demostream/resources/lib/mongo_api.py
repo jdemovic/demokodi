@@ -16,7 +16,7 @@ NETWORK_TIMEOUT = 30  # sekundy
 
 # Nastavenia
 PRIMARY_API = "https://web.demolator.app/mongo"
-FALLBACK_API = "http://91.99.208.89:10000/mongo"
+FALLBACK_API = "https://web.demostream.stream/mongo"
 
 # Globálna premenná pre aktuálnu API URL
 API_BASE = PRIMARY_API

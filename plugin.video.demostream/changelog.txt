@@ -1,3 +1,6 @@
+Version 1.3.3
+- vytvorenie domeny pre záložný server a jeho použitie v kode
+
 Version 1.3.2
 - Automaticke prepinanie na zalozny server pri nedostupnosti primarneho servera (nasledna kontrola o hodinu)
 - Moznost nastavit pouzitie zalozneho servera v nastaveniach
